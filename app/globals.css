@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Surfaces ─────────────────────────────── */
+    --bg-canvas:        #f5f5fa;
+    --bg-surface:       #ffffff;
+    --bg-well:          rgba(57, 70, 91, 0.03);
+    --bg-item-hover:    #f5f5fa;
+    --bg-item-active:   rgba(57, 70, 91, 0.05);
+    --bg-inverted:      #222530;
+    --bg-tooltip:       #222331;
+    --bg-scrim:         rgba(0, 0, 0, 0.4);
+
+    /* ── Borders ──────────────────────────────── */
+    --border-default:   #d5d5e8;
+    --border-hover:     #bdbdd6;
+    --border-divider:   rgba(57, 70, 91, 0.15);
+    --border-soft:      rgba(0, 0, 0, 0.05);
+    --border-selected:  #172131;
+
+    /* ── Text ─────────────────────────────────── */
+    --text-primary:     #172131;
+    --text-secondary:   #606a78;
+    --text-sub:         #8793a3;
+    --text-soft:        #99a0ae;
+    --text-disabled:    #cacfd8;
+    --text-inverted:    #ffffff;
+
+    /* ── State ────────────────────────────────── */
+    --success:          #1fc16b;
+    --success-bg:       #d1fae5;
+    --error:            #fb3748;
+    --error-border:     #f54a45;
+    --error-bg:         #ffebec;
+    --warning:          #ff8800;
+    --warning-bg:       #fbf5e0;
+    --info:             #6895ff;
+    --info-bg:          #ebf1ff;
+    --info-dark:        #122368;
+
+    /* ── Charts ───────────────────────────────── */
+    --chart-primary:    #6895ff;
+    --chart-grid:       #d5d5e8;
+    --chart-axis:       #737373;
+    --chart-bg:         rgba(57, 70, 91, 0.03);
+    --chart-1:  #82a7fc;  --chart-2:  #7edafb;  --chart-3:  #ad82f7;
+    --chart-4:  #f7dc82;  --chart-5:  #f98e8b;  --chart-6:  #ffba6b;
+    --chart-7:  #f57ac0;  --chart-8:  #64e8d6;  --chart-9:  #e58fe5;
+    --chart-10: #d2e76a;  --chart-11: #7b83ea;  --chart-12: #8ee085;
+
+    /* ── Radius ───────────────────────────────── */
+    --radius-xs: 4px;  --radius-sm: 6px;  --radius-md: 8px;
+    --radius-lg: 12px; --radius-xl: 16px;
+
+    /* ── Elevation ────────────────────────────── */
+    --shadow-s1: 0 2px 8px 2px rgba(31,35,41,.02), 0 2px 4px 0 rgba(31,35,41,.02), 0 1px 2px 2px rgba(31,35,41,.02);
+    --shadow-s2: 0 4px 16px 4px rgba(31,35,41,.03), 0 2px 6px -4px rgba(31,35,41,.04), 0 3px 6px 0 rgba(31,35,41,.03);
+    --shadow-s3: 0 6px 18px 6px rgba(31,35,41,.03), 0 3px 6px -6px rgba(31,35,41,.05), 0 4px 8px 0 rgba(31,35,41,.03);
+    --shadow-s5: 0 10px 36px 10px rgba(31,35,41,.04), 0 8px 24px 0 rgba(31,35,41,.04), 0 6px 12px -10px rgba(31,35,41,.06);
+
+    /* ── Motion ───────────────────────────────── */
+    --ease: cubic-bezier(.4, 0, .2, 1);
+  }
+
+  html { font-feature-settings: "cv11", "ss01"; }
+
+  body {
+    @apply antialiased;
+    font-family: Inter, "Inter Fallback", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-size: 16px;      /* matches source; the interface default of 14px is
+                             applied with `text-sm` on the app shell, not here,
+                             so `em`-based sizing in third-party components stays sane */
+    line-height: 24px;
+    min-width: 1440px;
+  }
+
+  /* Tabular figures everywhere numbers matter */
+  .tnum, td, th, .kpi { font-variant-numeric: tabular-nums; }
+
+  /* Focus ring — never a border change */
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(104,149,255,.45);
+    border-radius: var(--radius-md);
+  }
+
+  /* Thin scrollbars that match the border colour */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 9999px; border: 3px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+}
