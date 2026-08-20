@@ -99,6 +99,8 @@ export interface ManufacturerOrder {
   number: string;
   status: MoStatus;
   subtotal: number | null;
+  freight: number | null;
+  packing: number | null;
   total: number | null;
   currency: string;
   lead_time_days: number | null;
@@ -277,6 +279,25 @@ export interface Enquiry {
   requested_delivery_to: string | null;
   status: string;
   submitted_at: string | null;
+}
+
+/**
+ * `media_assets` — imagery, attached to a style, a colourway, an approval or a
+ * production event by `owner_type` + `owner_id`.
+ *
+ * The demo holds no photographs: every `url` is the literal `noor://gradient`,
+ * which is this platform's convention for "render `meta.gradient` instead of
+ * loading a file". See `pictureFor` in lib/invoice.ts.
+ */
+export interface MediaAsset {
+  id: string;
+  owner_type: string;
+  owner_id: string;
+  kind: string;
+  url: string | null;
+  thumb_url: string | null;
+  meta: unknown;
+  sort: number | null;
 }
 
 /** `events` — the audit log. Seeded empty; see lib/profile.ts. */

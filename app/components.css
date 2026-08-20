@@ -26,3 +26,66 @@
     transform: translateY(0);
   }
 }
+
+/*
+ * Print — DESIGN_SYSTEM.md §7.6's export view: "a 210mm white sheet with no
+ * canvas, no shadows, #172131 on white".
+ *
+ * This is what makes Download work with no PDF library: the browser's own
+ * print-to-PDF renders the sheets and nothing else. Everything outside
+ * `.print-region` is removed from the flow — the sidebar, the page header, the
+ * toolbar — so the output starts at the document rather than three pages in.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    /* No canvas on paper. */
+    background: #fff !important;
+    min-width: 0 !important;
+  }
+
+  /* Hide the app around the document. */
+  body :not(.print-region):not(.print-region *):not(:has(.print-region)) {
+    display: none !important;
+  }
+
+  .print-region {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    height: auto !important;
+    max-height: none !important;
+    width: auto !important;
+  }
+
+  /* One manufacturer per sheet. */
+  .invoice-sheet {
+    break-inside: avoid;
+    background: #fff !important;
+  }
+  .invoice-sheet + .invoice-sheet {
+    break-before: page;
+  }
+
+  /* Keep gradients and swatches — a picture is the point of this document. */
+  .invoice-sheet * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* A row should not straddle two pages. */
+  .invoice-sheet tr {
+    break-inside: avoid;
+  }
+}

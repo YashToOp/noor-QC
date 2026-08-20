@@ -18,6 +18,7 @@ import type {
   IssueType,
   LedgerEntry,
   ManufacturerOrder,
+  MediaAsset,
   OrderLine,
   OrderReview,
   Payment,
@@ -52,6 +53,8 @@ export const qk = {
   creditNotes: ["credit-notes"] as const,
   styles: ["styles"] as const,
   masters: ["masters"] as const,
+  media: ["media-assets"] as const,
+  invoiceBatch: (id: string) => ["invoice-batch", id] as const,
 };
 
 async function must<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
@@ -61,7 +64,7 @@ async function must<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Prom
 }
 
 const ORDER_COLUMNS =
-  "id, tenant_id, enquiry_id, client_id, house_id, number, status, subtotal, total, currency, lead_time_days, promised_ship_date, expected_arrival_date, declined_reason, created_at, updated_at";
+  "id, tenant_id, enquiry_id, client_id, house_id, number, status, subtotal, freight, packing, total, currency, lead_time_days, promised_ship_date, expected_arrival_date, declined_reason, created_at, updated_at";
 
 const EVENT_COLUMNS =
   "id, manufacturer_order_id, stage_id, status, qty_in, qty_out, expected_at, started_at, completed_at, note";
@@ -268,6 +271,159 @@ export function useCreditNotes() {
           .select(CREDIT_COLUMNS)
           .order("issued_at", { ascending: false }),
       ),
+  });
+}
+
+export interface InvoiceBatchOrder {
+  order: ManufacturerOrder;
+  house: House | null;
+  lines: OrderLine[];
+  invoice: Invoice | null;
+  /** The order-review gate, if one exists — approving it is what sends the order. */
+  review: OrderReview | null;
+}
+
+export interface InvoiceBatch {
+  enquiry: Enquiry | null;
+  client: Client | null;
+  tenant: Tenant | null;
+  styles: Map<string, Style>;
+  colourways: Map<string, Colourway>;
+  media: MediaAsset[];
+  stages: ProductionStage[];
+  orders: InvoiceBatchOrder[];
+}
+
+/**
+ * Everything needed to render one invoice per manufacturer for a single
+ * enquiry.
+ *
+ * A basket that spans four houses is already four `manufacturer_orders`, so
+ * "four invoices for four manufacturers" is a grouping, not a new concept.
+ */
+export function useInvoiceBatch(enquiryId: string) {
+  return useQuery({
+    queryKey: qk.invoiceBatch(enquiryId),
+    queryFn: async (): Promise<InvoiceBatch | null> => {
+      const db = supabase();
+
+      const enquiries = await must<Enquiry[]>(
+        db
+          .from("enquiries")
+          .select(
+            "id, client_id, basket_id, number, requested_delivery_from, requested_delivery_to, status, submitted_at",
+          )
+          .eq("id", enquiryId),
+      );
+      const enquiry = enquiries[0] ?? null;
+
+      const orders = await must<ManufacturerOrder[]>(
+        db
+          .from("manufacturer_orders")
+          .select(ORDER_COLUMNS)
+          .eq("enquiry_id", enquiryId)
+          .order("number"),
+      );
+      if (!orders.length) return { enquiry, client: null, tenant: null, styles: new Map(), colourways: new Map(), media: [], stages: [], orders: [] };
+
+      const orderIds = orders.map((o) => o.id);
+
+      const [lines, invoices, reviews, houses, clients, tenants, media, stages] = await Promise.all([
+        must<OrderLine[]>(
+          db
+            .from("manufacturer_order_lines")
+            .select(
+              "id, manufacturer_order_id, style_id, colourway_id, packs, pcs, unit_price, line_total, status",
+            )
+            .in("manufacturer_order_id", orderIds),
+        ),
+        must<Invoice[]>(
+          db.from("invoices").select(INVOICE_COLUMNS).in("manufacturer_order_id", orderIds),
+        ),
+        must<OrderReview[]>(
+          db.from("order_reviews").select("*").in("manufacturer_order_id", orderIds),
+        ),
+        must<House[]>(db.from("houses").select("id, code, name, city, country, specialities")),
+        must<Client[]>(db.from("clients").select("id, code, name, country, city, currency")),
+        must<Tenant[]>(
+          db.from("tenants").select("id, slug, name, name_ar, default_currency").limit(1),
+        ),
+        must<MediaAsset[]>(
+          db
+            .from("media_assets")
+            .select("id, owner_type, owner_id, kind, url, thumb_url, meta, sort"),
+        ),
+        must<ProductionStage[]>(db.from("production_stages").select(STAGE_COLUMNS).order("sort")),
+      ]);
+
+      const styleIds = lines.map((l) => l.style_id).filter(Boolean) as string[];
+      const colourIds = lines.map((l) => l.colourway_id).filter(Boolean) as string[];
+
+      const [styles, colourways] = await Promise.all([
+        styleIds.length
+          ? must<Style[]>(
+              db
+                .from("styles")
+                .select(
+                  "id, code, name, fabric, composition, lead_time_days, moq_packs, base_price, currency",
+                )
+                .in("id", styleIds),
+            )
+          : Promise.resolve([] as Style[]),
+        colourIds.length
+          ? must<Colourway[]>(
+              db
+                .from("colourways")
+                .select("id, style_id, name, hex, colour_family, moq_packs")
+                .in("id", colourIds),
+            )
+          : Promise.resolve([] as Colourway[]),
+      ]);
+
+      const houseById = new Map(houses.map((h) => [h.id, h]));
+      const clientById = new Map(clients.map((c) => [c.id, c]));
+      // One open review per order per type; order_review is the one that sends it.
+      const reviewByOrder = new Map(
+        reviews.filter((r) => r.gate_type === "order_review").map((r) => [r.manufacturer_order_id, r]),
+      );
+      const invoiceByOrder = new Map(
+        invoices
+          .filter((i) => i.manufacturer_order_id)
+          .map((i) => [i.manufacturer_order_id as string, i]),
+      );
+
+      return {
+        enquiry,
+        client: enquiry?.client_id ? clientById.get(enquiry.client_id) ?? null : null,
+        tenant: tenants[0] ?? null,
+        styles: new Map(styles.map((s) => [s.id, s])),
+        colourways: new Map(colourways.map((c) => [c.id, c])),
+        media,
+        stages,
+        orders: orders.map((order) => ({
+          order,
+          house: order.house_id ? houseById.get(order.house_id) ?? null : null,
+          lines: lines.filter((l) => l.manufacturer_order_id === order.id),
+          invoice: invoiceByOrder.get(order.id) ?? null,
+          review: reviewByOrder.get(order.id) ?? null,
+        })),
+      };
+    },
+    enabled: Boolean(enquiryId),
+  });
+}
+
+/** Imagery. Small and static, so the whole table is cached. */
+export function useMediaAssets() {
+  return useQuery({
+    queryKey: qk.media,
+    queryFn: () =>
+      must<MediaAsset[]>(
+        supabase()
+          .from("media_assets")
+          .select("id, owner_type, owner_id, kind, url, thumb_url, meta, sort"),
+      ),
+    staleTime: 5 * 60_000,
   });
 }
 

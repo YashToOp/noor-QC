@@ -26,9 +26,12 @@ import {
   qk,
 } from "@/lib/queries";
 import { useNow } from "@/lib/realtime";
+import { useRouter } from "next/navigation";
+import { useEnquiries } from "@/lib/queries";
+import { invoiceStage } from "@/lib/invoice";
 import { clientBalance } from "@/lib/profile";
 import { isoDate, nextDocumentNumber, recordCreditNote, recordInvoice } from "@/lib/finance";
-import type { CreditNote, Invoice } from "@/lib/types";
+import type { CreditNote, Invoice, ManufacturerOrder } from "@/lib/types";
 import { formatCount, formatDate, formatMoney, formatMoneyFull, UNKNOWN } from "@/lib/format";
 import { MixedCurrencyNotice } from "@/components/profile/profile-bits";
 import { cn } from "@/lib/utils";
@@ -42,6 +45,7 @@ import { cn } from "@/lib/utils";
  * triggers and nothing else would — see the note at the top of lib/finance.ts.
  */
 const TABS = [
+  { id: "batches", label: "By enquiry" },
   { id: "invoices", label: "Invoices" },
   { id: "credits", label: "Credit notes" },
 ];
@@ -59,8 +63,10 @@ export default function InvoicesPage() {
   const orders = useOrders();
   const tenant = useTenant();
   const display = useDisplayCurrency();
+  const router = useRouter();
+  const enquiries = useEnquiries();
 
-  const [tab, setTab] = React.useState("invoices");
+  const [tab, setTab] = React.useState("batches");
   const [raising, setRaising] = React.useState<null | "invoice" | "credit">(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -162,6 +168,87 @@ export default function InvoicesPage() {
       setBusy(false);
     }
   };
+
+  /**
+   * One row per enquiry — the customer's "I ordered from four manufacturers"
+   * view. Each becomes N invoices, one per manufacturer order.
+   */
+  const batchRows = React.useMemo(() => {
+    const byEnquiry = new Map<string, ManufacturerOrder[]>();
+    for (const o of orders.data ?? []) {
+      if (!o.enquiry_id) continue;
+      const bucket = byEnquiry.get(o.enquiry_id);
+      if (bucket) bucket.push(o);
+      else byEnquiry.set(o.enquiry_id, [o]);
+    }
+    return (enquiries.data ?? [])
+      .filter((e) => byEnquiry.has(e.id))
+      .map((e) => {
+        const os = byEnquiry.get(e.id)!;
+        return {
+          enquiry: e,
+          manufacturers: new Set(os.map((o) => o.house_id)).size,
+          awaiting: os.filter((o) => invoiceStage(o.status) === "awaiting_approval").length,
+          sent: os.filter((o) => invoiceStage(o.status) === "sent").length,
+          value: os.reduce((sum, o) => sum + Number(o.total ?? 0), 0),
+          currency: os[0]?.currency ?? display,
+        };
+      });
+  }, [enquiries.data, orders.data, display]);
+
+  type BatchRow = (typeof batchRows)[number];
+
+  const batchColumns: Column<BatchRow>[] = [
+    {
+      id: "number",
+      header: "Enquiry",
+      primary: true,
+      render: (r) => r.enquiry.number,
+      sortValue: (r) => r.enquiry.number,
+      width: "160px",
+    },
+    {
+      id: "client",
+      header: "Customer",
+      render: (r) =>
+        r.enquiry.client_id ? clientById.get(r.enquiry.client_id)?.name ?? UNKNOWN : UNKNOWN,
+      sortValue: (r) =>
+        r.enquiry.client_id ? clientById.get(r.enquiry.client_id)?.name ?? "" : "",
+    },
+    {
+      id: "manufacturers",
+      header: "Manufacturers",
+      numeric: true,
+      render: (r) => formatCount(r.manufacturers),
+      sortValue: (r) => r.manufacturers,
+      width: "148px",
+    },
+    {
+      id: "awaiting",
+      header: "Awaiting you",
+      numeric: true,
+      render: (r) =>
+        r.awaiting === 0 ? <span className="text-ink-disabled">—</span> : formatCount(r.awaiting),
+      sortValue: (r) => r.awaiting,
+      width: "140px",
+    },
+    {
+      id: "sent",
+      header: "Sent",
+      numeric: true,
+      render: (r) => formatCount(r.sent),
+      sortValue: (r) => r.sent,
+      width: "104px",
+    },
+    {
+      id: "value",
+      header: "Value",
+      numeric: true,
+      render: (r) => formatMoney(r.value, r.currency),
+      sortValue: (r) => r.value,
+      width: "140px",
+    },
+  ];
 
   const invoiceColumns: Column<Invoice>[] = [
     {
@@ -342,6 +429,22 @@ export default function InvoicesPage() {
               <div className="overflow-hidden rounded-xl border-hairline border-line bg-surface">
                 <TableSkeleton rows={5} cols={6} />
               </div>
+            ) : tab === "batches" ? (
+              <DataTable
+                caption="Enquiries and the invoices they produce, one per manufacturer"
+                columns={batchColumns}
+                rows={batchRows}
+                rowKey={(r) => r.enquiry.id}
+                onRowClick={(r) => router.push(`/invoices/batch/${r.enquiry.id}`)}
+                defaultSort={{ columnId: "number", direction: "desc" }}
+                empty={
+                  <EmptyState
+                    icon={<Receipt />}
+                    title="No enquiries with orders"
+                    description="An enquiry spanning four manufacturers becomes four invoices, one each."
+                  />
+                }
+              />
             ) : tab === "invoices" ? (
               <DataTable
                 caption="Invoices raised against clients"

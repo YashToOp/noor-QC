@@ -247,6 +247,61 @@ rather than implying a permission model that nothing checks.
 Still out of scope: auth, RLS, multi-tenant switching, print/export views, the
 density toggle, and the command palette.
 
+## Invoices
+
+A basket spanning four manufacturers is already four `manufacturer_orders`, so
+four invoices falls out of the existing shape — nothing was invented for it.
+
+- `/invoices` opens on **By enquiry**: one row per enquiry, with how many
+  manufacturers it covers and how many invoices await approval.
+- `/invoices/batch/[enquiryId]` is the batch — every invoice for that enquiry,
+  **Download all**, and **Approve & send**.
+- `/invoices/order/[orderId]` is one manufacturer's invoice on its own.
+
+Each sheet carries what the customer asked for: their name, the manufacturer's
+name, and per line the item, colour, quantity, rate and **picture**.
+
+**Download** is the browser's own print-to-PDF — no PDF library, no server
+render. The `@media print` block in `app/components.css` hides everything
+outside `.print-region`, forces A4, breaks one manufacturer per page, and keeps
+background colours so the pictures and swatches survive. §7.6's print rules:
+210mm sheet, no canvas, no shadows.
+
+**Approve & send does not invent a second approval.** It decides each order's
+existing `order_review` gate, which is the write that moves the order to
+`released` — the exact moment Sharik can see it. One button, four gates, the
+same state machine as the queue. Orders still being quoted or negotiated have
+not reached a gate; the batch lists them as blocked and sends the rest.
+
+### The picture
+
+There are **no photographs in the database**. Every `media_assets.url` is the
+literal `noor://gradient`, which is this platform's convention for "render
+`meta.gradient` instead of loading a file" — Majlis does exactly that in its
+`GradientBlock`. `pictureFor` in `lib/invoice.ts` resolves in the same order
+Majlis does:
+
+1. a real image, when `url` is an `http(s)` URL
+2. the style's two-stop gradient from `meta.gradient`
+3. the colourway's own `hex`
+4. a neutral well, so the cell never collapses
+
+Put a real URL into `media_assets.url` and the photograph renders with no code
+change. Until then the invoice shows the same block the client saw when they
+ordered, which is the honest answer rather than a broken image icon.
+
+### Invoice totals are computed, not copied
+
+An invoice must foot, so every amount is `pcs × unit_price`. Where the stored
+`line_total` or `manufacturer_orders.subtotal` disagrees, the document prints
+both and names the difference instead of silently choosing one.
+
+That is not hypothetical: on enquiry **NT-2026-0184** — the four-manufacturer
+one — `unit_price` was converted to INR but `line_total` and `subtotal` were
+not, so the lines come to ₹4,13,250 while the order stores ₹4,872. The five
+older orders foot correctly. Fixing those four orders' stored totals clears the
+warning.
+
 ### Ledger integrity
 
 `information_schema.triggers` is empty for `public` — nothing projects a
