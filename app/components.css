@@ -1,0 +1,28 @@
+/*
+ * Component-level keyframes.
+ *
+ * Kept out of app/globals.css deliberately: that file is a verbatim
+ * transcription of DESIGN_SYSTEM.md §3.1 and nothing may be added to it.
+ * §5.10 requires a skeleton shimmer ("1.6s, ease-in-out, translate a
+ * rgba(255,255,255,.6) highlight") that §3 does not define, so it lives here.
+ *
+ * The reduced-motion rule in globals.css already neutralises this animation.
+ */
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Toast entry — a floating layer, so motion is allowed (§2.7). */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
