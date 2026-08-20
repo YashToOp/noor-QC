@@ -3,7 +3,6 @@
 import {
   Bar,
   BarChart,
-  CartesianGrid,
   Cell,
   LabelList,
   ResponsiveContainer,
@@ -11,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AXIS_PROPS, CHART_MARGIN, ChartTooltip, GRID_PROPS } from "./chart-primitives";
+import { AXIS_PROPS, CHART_MARGIN, ChartTooltip } from "./chart-primitives";
 import { compact } from "@/lib/format";
 
 /**
@@ -57,8 +56,17 @@ export function RankedBarChart({
           margin={{ ...CHART_MARGIN, right: 44 }}
           barCategoryGap={2}
         >
-          <CartesianGrid {...GRID_PROPS} horizontal={false} vertical />
+          {/*
+            No gridlines here, deliberately.
 
+            §6.1 allows horizontal gridlines only, never vertical. In a
+            horizontal bar chart the value axis runs left-to-right, so the
+            gridlines that would actually help are vertical — which the spec
+            forbids — and horizontal ones would draw between category rows,
+            which is simply wrong. Since every bar is direct-labelled with its
+            value, the grid has nothing left to do, so it is omitted rather
+            than drawn in the one orientation the system rules out.
+          */}
           <XAxis type="number" {...AXIS_PROPS} tickFormatter={compact} allowDecimals={false} />
           <YAxis
             type="category"

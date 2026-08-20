@@ -283,7 +283,12 @@ export default function GateDetailPage() {
                 </p>
               )}
 
-              {/* Actions right-aligned, primary last (§5.9). */}
+              {/*
+                Actions right-aligned, primary last (§5.9). Approve is the one
+                filled primary on this screen (Part E); while a dialog is open
+                it is disabled, so the dialog's confirm is the only *active*
+                filled primary in view and the count still holds.
+              */}
               {decided ? (
                 <p className="text-xs text-ink-secondary">
                   Decided {formatDate(review!.decided_at)} — this gate is closed.
@@ -296,7 +301,7 @@ export default function GateDetailPage() {
                       setPrompt("reject");
                       setNote("");
                     }}
-                    disabled={busy !== null}
+                    disabled={busy !== null || prompt !== null}
                   >
                     Reject
                   </Button>
@@ -306,7 +311,7 @@ export default function GateDetailPage() {
                       setPrompt("query");
                       setNote("");
                     }}
-                    disabled={busy !== null}
+                    disabled={busy !== null || prompt !== null}
                   >
                     Query
                   </Button>
@@ -314,7 +319,7 @@ export default function GateDetailPage() {
                     variant="primary"
                     onClick={onApprove}
                     loading={busy === "approve"}
-                    disabled={!ready || busy !== null || !review}
+                    disabled={!ready || busy !== null || prompt !== null || !review}
                   >
                     Approve
                   </Button>
