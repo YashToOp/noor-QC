@@ -34,13 +34,36 @@ they are inlined into the client bundle and readable by anyone who loads the
 page — that is inherent to a browser-only Supabase client, not a property of
 where the values are stored.
 
-**The deployment is public and has no auth.** Deployment protection is off, this
-build has no login by design (build prompt Part F), and RLS is off on the shared
-project. Anyone with the URL can read every client, order and price in the demo
-database, and can release orders, decide gates and resolve issues. The anon key
-is already public in this repo and inside the Flutter APKs, so the URL does not
-create the exposure — it makes it convenient. Vercel password protection is the
-cheap mitigation if the link is going anywhere beyond the demo laptop.
+### Protection, and what this plan allows
+
+Current state: **production is public; preview deployments require a Vercel
+login.** That split is not a choice, it is the plan — the Vercel account is on
+Hobby, where:
+
+- password protection needs the paid Advanced Deployment Protection add-on
+  (`428 invalid_password_protection`)
+- Vercel Authentication is refused for production (`428 invalid_sso_protection`)
+  but works for previews, and is now enabled there
+
+So the production URL cannot be locked from this account as it stands. Three
+ways to close it, in ascending cost:
+
+1. **Demo off a preview URL.** In Settings → Git, set the production branch to
+   something this repo does not push to (e.g. `main`). Pushes to
+   `claude/noor-core-qc-dashboard-4lfzne` then build as previews, which the
+   Vercel Authentication above already protects — the demo laptop just needs to
+   be signed into the Vercel account.
+2. **Pause the project between demos.** A paused project returns 503 until
+   unpaused. Free, instant, and reversible; it shrinks the exposure window to
+   the times you are actually presenting.
+3. **Upgrade to Pro** and turn on password protection for all deployments.
+
+What is exposed while it is public: this build has no login by design (build
+prompt Part F) and RLS is off on the shared project, so anyone with the URL can
+read every client, order and price in the demo database and can release orders,
+decide gates and resolve issues. The anon key is already public in this repo and
+inside the Flutter APKs, so the URL does not create that exposure — it makes it
+convenient.
 
 ## Rule Zero
 
