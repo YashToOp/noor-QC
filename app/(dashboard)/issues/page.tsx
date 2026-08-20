@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { ChartCard } from "@/components/charts/chart-card";
 import { RankedBarChart } from "@/components/charts/ranked-bar-chart";
 import {
+  useDisplayCurrency,
   useClients,
   useHouses,
   useIssueTypes,
@@ -117,7 +118,7 @@ export default function IssuesPage() {
   );
 
   const nowMs = now || Date.now();
-  const currency = (orders.data ?? [])[0]?.currency ?? "USD";
+  const currency = useDisplayCurrency();
 
   const typeOf = React.useCallback(
     (issue: Issue): IssueType | null =>

@@ -223,11 +223,48 @@ lib/realtime.ts          subscriptions; invalidation, never local-state writes
 
 ## Scope
 
-Built: the gate queue carrying all four gate types, the gate detail, the home
-dashboard, the order board with detail, and the issues desk. Every other sidebar
-row is a real route rendering a §5.10 empty state. No auth, no RLS, no
-multi-tenant switching, no print/export view, no density toggle, no command
-palette.
+**Every sidebar row is now a real page.** Gate queue and gate detail, home,
+orders, issues, samples, enquiries, production, clients, houses, invoices,
+payments, masters, users, and search.
+
+What each one writes is decided by the contract's write map, not by what would
+be convenient:
+
+| Page | Writes |
+|---|---|
+| Gate queue / detail | opens and decides all four gates; releases and ships orders |
+| Issues | walks the `issue_status` ladder — the resolve verb |
+| Samples | raises a sample gate; the gate itself moves the approval |
+| Invoices, Payments | invoices, credit notes, payments — **and their ledger rows** |
+| Orders, Production, Enquiries, Clients, Houses, Masters, Users | read-only |
+
+Enquiries are read-only because Majlis owns them. Masters is read-only because
+the stage ladder and issue types are shared with the other two apps, and
+renaming a stage here would silently change what they display. Users is
+read-only because there is no auth to enforce a role against — the page says so
+rather than implying a permission model that nothing checks.
+
+Still out of scope: auth, RLS, multi-tenant switching, print/export views, the
+density toggle, and the command palette.
+
+### Ledger integrity
+
+`information_schema.triggers` is empty for `public` — nothing projects a
+document into `ledger_entries` automatically, the seed wrote both by hand. So
+recording an invoice, payment or credit note writes the document **and** its
+ledger row, or the client's balance card and ledger tab would drift apart. The
+document lands first: a document with no ledger row is visible and
+reconcilable, while a ledger row pointing at a document that does not exist is
+a phantom balance.
+
+### The demo data is mid-currency-conversion
+
+Most money is now INR — the tenant default — but a few rows are still USD:
+order `NT-2026-0171-A` and its two lines, style `J-2204`, and one `price_lists`
+row. Any total across them adds two different units, so the pages that sum
+money show a notice when they see more than one currency. Display currency
+comes from `tenants.default_currency`, never from whichever row sorted first.
+Finishing the conversion on those four rows makes the notice disappear.
 
 ### Issues
 

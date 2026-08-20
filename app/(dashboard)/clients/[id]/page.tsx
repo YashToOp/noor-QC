@@ -12,7 +12,7 @@ import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { MetricSkeleton, Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ActivityRail } from "@/components/profile/activity-rail";
-import { ContactCard, Row } from "@/components/profile/profile-bits";
+import { ContactCard, MixedCurrencyNotice, Row } from "@/components/profile/profile-bits";
 import { useClientProfile } from "@/lib/queries";
 import { useNow } from "@/lib/realtime";
 import { issueBadge, orderBadge, STATUS_LABEL } from "@/lib/status";
@@ -228,6 +228,10 @@ export default function ClientProfilePage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
         <div className="grid grid-cols-12 items-stretch gap-4 pb-4">
+          <MixedCurrencyNotice
+            currencies={[currency, ...d.orders.map((o) => o.currency)]}
+            display={currency}
+          />
           {/* KPI row is shared across tabs — it is the answer to "how is this
               relationship doing", which every tab is a detail of. */}
           <MetricCard

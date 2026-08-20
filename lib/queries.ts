@@ -46,6 +46,12 @@ export const qk = {
   appUsers: ["app-users"] as const,
   clientProfile: (id: string) => ["client-profile", id] as const,
   houseProfile: (id: string) => ["house-profile", id] as const,
+  enquiries: ["enquiries"] as const,
+  invoices: ["invoices"] as const,
+  payments: ["payments"] as const,
+  creditNotes: ["credit-notes"] as const,
+  styles: ["styles"] as const,
+  masters: ["masters"] as const,
 };
 
 async function must<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
@@ -55,7 +61,7 @@ async function must<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Prom
 }
 
 const ORDER_COLUMNS =
-  "id, tenant_id, client_id, house_id, number, status, subtotal, total, currency, lead_time_days, promised_ship_date, expected_arrival_date, declined_reason, created_at, updated_at";
+  "id, tenant_id, enquiry_id, client_id, house_id, number, status, subtotal, total, currency, lead_time_days, promised_ship_date, expected_arrival_date, declined_reason, created_at, updated_at";
 
 const EVENT_COLUMNS =
   "id, manufacturer_order_id, stage_id, status, qty_in, qty_out, expected_at, started_at, completed_at, note";
@@ -73,10 +79,24 @@ export function useTenant() {
   return useQuery({
     queryKey: qk.tenant,
     queryFn: () =>
-      must<Tenant[]>(supabase().from("tenants").select("id, slug, name, name_ar").limit(1)),
+      must<Tenant[]>(
+        supabase().from("tenants").select("id, slug, name, name_ar, default_currency").limit(1),
+      ),
     select: (rows) => rows[0] ?? null,
     staleTime: 5 * 60_000,
   });
+}
+
+/**
+ * The currency to display money in.
+ *
+ * Comes from the tenant rather than from whichever row happened to sort first
+ * — "first row wins" silently flips the whole page's currency when the data
+ * holds more than one, which it currently does.
+ */
+export function useDisplayCurrency(): string {
+  const tenant = useTenant();
+  return tenant.data?.default_currency ?? "INR";
 }
 
 export function useProductionStages() {
@@ -192,6 +212,138 @@ export function useClients() {
   });
 }
 
+const INVOICE_COLUMNS =
+  "id, client_id, manufacturer_order_id, number, amount, currency, issued_at, due_at";
+const PAYMENT_COLUMNS = "id, client_id, amount, currency, method, reference, received_at";
+const CREDIT_COLUMNS =
+  "id, client_id, manufacturer_order_id, issue_id, number, amount, currency, reason, issued_at";
+const LEDGER_COLUMNS =
+  "id, client_id, kind, ref_type, ref_id, amount, currency, occurred_at, description";
+
+export function useEnquiries() {
+  return useQuery({
+    queryKey: qk.enquiries,
+    queryFn: () =>
+      must<Enquiry[]>(
+        supabase()
+          .from("enquiries")
+          .select(
+            "id, client_id, basket_id, number, requested_delivery_from, requested_delivery_to, status, submitted_at",
+          )
+          .order("submitted_at", { ascending: false }),
+      ),
+  });
+}
+
+export function useInvoices() {
+  return useQuery({
+    queryKey: qk.invoices,
+    queryFn: () =>
+      must<Invoice[]>(
+        supabase().from("invoices").select(INVOICE_COLUMNS).order("issued_at", { ascending: false }),
+      ),
+  });
+}
+
+export function usePayments() {
+  return useQuery({
+    queryKey: qk.payments,
+    queryFn: () =>
+      must<Payment[]>(
+        supabase()
+          .from("payments")
+          .select(PAYMENT_COLUMNS)
+          .order("received_at", { ascending: false }),
+      ),
+  });
+}
+
+export function useCreditNotes() {
+  return useQuery({
+    queryKey: qk.creditNotes,
+    queryFn: () =>
+      must<CreditNote[]>(
+        supabase()
+          .from("credit_notes")
+          .select(CREDIT_COLUMNS)
+          .order("issued_at", { ascending: false }),
+      ),
+  });
+}
+
+export function useStyles() {
+  return useQuery({
+    queryKey: qk.styles,
+    queryFn: () =>
+      must<Style[]>(
+        supabase()
+          .from("styles")
+          .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price, currency")
+          .order("code"),
+      ),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Reference data behind /masters, fetched in one go since none of it changes. */
+export interface Masters {
+  stages: ProductionStage[];
+  issueTypes: IssueType[];
+  categories: { id: string; code: string; name: string; sort: number | null }[];
+  sizeCurves: { id: string; name: string; sizes: unknown }[];
+  ratioPacks: {
+    id: string;
+    style_id: string | null;
+    name: string;
+    ratio: unknown;
+    pcs_per_pack: number | null;
+    is_default: boolean | null;
+  }[];
+  priceLists: {
+    id: string;
+    client_id: string | null;
+    style_id: string | null;
+    price: number | null;
+    currency: string;
+    valid_from: string | null;
+    valid_to: string | null;
+  }[];
+  agreements: { id: string; version: string; effective_from: string | null }[];
+}
+
+export function useMasters() {
+  return useQuery({
+    queryKey: qk.masters,
+    queryFn: async (): Promise<Masters> => {
+      const db = supabase();
+      const [stages, issueTypes, categories, sizeCurves, ratioPacks, priceLists, agreements] =
+        await Promise.all([
+          must<Masters["stages"]>(db.from("production_stages").select(STAGE_COLUMNS).order("sort")),
+          must<Masters["issueTypes"]>(
+            db.from("issue_types").select("id, category, code, name, sla_hours").order("code"),
+          ),
+          must<Masters["categories"]>(
+            db.from("categories").select("id, code, name, sort").order("sort"),
+          ),
+          must<Masters["sizeCurves"]>(db.from("size_curves").select("id, name, sizes")),
+          must<Masters["ratioPacks"]>(
+            db.from("ratio_packs").select("id, style_id, name, ratio, pcs_per_pack, is_default"),
+          ),
+          must<Masters["priceLists"]>(
+            db
+              .from("price_lists")
+              .select("id, client_id, style_id, price, currency, valid_from, valid_to"),
+          ),
+          must<Masters["agreements"]>(
+            db.from("agreement_versions").select("id, version, effective_from"),
+          ),
+        ]);
+      return { stages, issueTypes, categories, sizeCurves, ratioPacks, priceLists, agreements };
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
 /** Contacts. The only table with a phone number, so search leans on it. */
 export function useAppUsers() {
   return useQuery({
@@ -207,14 +359,6 @@ export function useAppUsers() {
     staleTime: 5 * 60_000,
   });
 }
-
-const INVOICE_COLUMNS =
-  "id, client_id, manufacturer_order_id, number, amount, currency, issued_at, due_at";
-const PAYMENT_COLUMNS = "id, client_id, amount, currency, method, reference, received_at";
-const CREDIT_COLUMNS =
-  "id, client_id, manufacturer_order_id, issue_id, number, amount, currency, reason, issued_at";
-const LEDGER_COLUMNS =
-  "id, client_id, kind, ref_type, ref_id, amount, currency, occurred_at, description";
 
 export interface ClientProfile {
   client: Client;
@@ -389,7 +533,7 @@ export function useHouseProfile(houseId: string) {
         must<Style[]>(
           db
             .from("styles")
-            .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price")
+            .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price, currency")
             .eq("house_id", houseId),
         ),
         must<AuditEvent[]>(
@@ -613,7 +757,7 @@ async function fetchGateDetail(gateKey: string): Promise<GateDetail | null> {
       ? must<Style[]>(
           db
             .from("styles")
-            .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price")
+            .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price, currency")
             .in("id", styleIds),
         )
       : Promise.resolve([] as Style[]),
@@ -746,7 +890,7 @@ export function useOrderDetail(orderId: string) {
           ? must<Style[]>(
               db
                 .from("styles")
-                .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price")
+                .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price, currency")
                 .in("id", styleIds),
             )
           : Promise.resolve([] as Style[]),

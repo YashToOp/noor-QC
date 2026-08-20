@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Phone, User } from "lucide-react";
+import { AlertTriangle, Phone, User } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { UNKNOWN } from "@/lib/format";
@@ -108,5 +108,36 @@ export function NotRecorded({
         <p className="mt-1 text-xs text-ink-secondary">{why}</p>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Totals only mean something when every row shares a currency.
+ *
+ * The demo data is mid-conversion from USD to INR — most rows moved, a few did
+ * not — so any sum across them is adding two different units. Rather than
+ * silently produce a meaningless number, the pages that total money say so
+ * when they see more than one currency.
+ */
+export function MixedCurrencyNotice({
+  currencies,
+  display,
+}: {
+  currencies: string[];
+  display: string;
+}) {
+  const distinct = Array.from(new Set(currencies.filter(Boolean)));
+  if (distinct.length < 2) return null;
+
+  const others = distinct.filter((c) => c !== display);
+  return (
+    <div className="col-span-12 flex items-start gap-2 rounded-lg border-hairline border-line bg-well p-3">
+      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-state-warning" aria-hidden />
+      <p className="text-xs text-ink-secondary">
+        <span className="font-medium text-ink">Totals mix currencies. </span>
+        These records are not all in {display} — {others.join(", ")} also appears — so the sums
+        below add different units and are not meaningful until the data is on one currency.
+      </p>
+    </div>
   );
 }

@@ -17,6 +17,7 @@ import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { MetricSkeleton, TableSkeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
+  useDisplayCurrency,
   useAllReviews,
   useGateQueue,
   useIssues,
@@ -122,7 +123,7 @@ export default function GateQueuePage() {
     return { awaiting, production, atRisk, onTime };
   }, [orders.data, events.data, issues.data, stages.data, reviews.data, rows.length, scope.range, now]);
 
-  const currency = (orders.data ?? [])[0]?.currency ?? "USD";
+  const currency = useDisplayCurrency();
   const loading = queue.isLoading || orders.isLoading;
 
   /**

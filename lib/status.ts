@@ -109,3 +109,54 @@ export const STATUS_LABEL: Record<MoStatus, string> = {
   closed: "Closed",
   cancelled: "Cancelled",
 };
+
+/**
+ * Approval (sample / shade) status → badge. `approval_status` has six members
+ * and §5.8 allows six badge states, but they are not the same six — these map
+ * onto the buckets by what the state *means to the operator*, not by name.
+ */
+export function approvalBadge(status: string): BadgeSpec {
+  switch (status) {
+    case "pending":
+      return { tone: "pending", label: "With client" };
+    case "approved":
+      return { tone: "active", label: "Approved" };
+    case "revision_requested":
+      return { tone: "progress", label: "Revision asked" };
+    case "conditional":
+      return { tone: "progress", label: "Conditional" };
+    case "superseded":
+      return { tone: "closed", label: "Superseded" };
+    case "expired":
+      return { tone: "rejected", label: "Expired" };
+    default:
+      return { tone: "draft", label: "Draft" };
+  }
+}
+
+/** `enquiry_status` → badge. */
+export function enquiryBadge(status: string): BadgeSpec {
+  switch (status) {
+    case "draft":
+      return { tone: "draft", label: "Draft" };
+    case "submitted":
+      return { tone: "pending", label: "Submitted" };
+    case "quoting":
+      return { tone: "progress", label: "Quoting" };
+    case "quoted":
+      return { tone: "active", label: "Quoted" };
+    case "closed":
+      return { tone: "closed", label: "Closed" };
+    default:
+      return { tone: "draft", label: "Draft" };
+  }
+}
+
+/** Sample/shade type, spelled out. */
+export const APPROVAL_TYPE_LABEL: Record<string, string> = {
+  lab_dip: "Lab dip",
+  pp_sample: "Pre-production sample",
+  size_set: "Size set",
+  inspection: "Inspection",
+  artwork: "Artwork",
+};

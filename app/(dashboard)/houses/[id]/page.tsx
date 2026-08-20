@@ -14,8 +14,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { ChartCard } from "@/components/charts/chart-card";
 import { RankedBarChart } from "@/components/charts/ranked-bar-chart";
 import { ActivityRail } from "@/components/profile/activity-rail";
-import { ContactCard, NotRecorded, Row } from "@/components/profile/profile-bits";
-import { useHouseProfile } from "@/lib/queries";
+import { ContactCard, MixedCurrencyNotice, NotRecorded, Row } from "@/components/profile/profile-bits";
+import { useDisplayCurrency, useHouseProfile } from "@/lib/queries";
 import { issueBadge, orderBadge, STATUS_LABEL } from "@/lib/status";
 import { ISSUE_STATUS_LABEL } from "@/lib/issues";
 import { buildActivity, deliveryRecord, orderBook } from "@/lib/profile";
@@ -47,6 +47,7 @@ export default function HouseProfilePage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const profile = useHouseProfile(params.id);
+  const currency = useDisplayCurrency();
   const [tab, setTab] = React.useState("overview");
 
   const derived = React.useMemo(() => {
@@ -101,7 +102,6 @@ export default function HouseProfilePage() {
 
   const d = profile.data;
   const { book, delivery, activity } = derived;
-  const currency = d.orders[0]?.currency ?? "USD";
   const latest = d.scores[0] ?? null;
   const openIssues = d.issues.filter(
     (i) => i.status !== "resolved" && i.status !== "rejected",
@@ -227,6 +227,10 @@ export default function HouseProfilePage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto pt-4">
         <div className="grid grid-cols-12 items-stretch gap-4 pb-4">
+          <MixedCurrencyNotice
+            currencies={[currency, ...d.orders.map((o) => o.currency)]}
+            display={currency}
+          />
           <MetricCard
             className="col-span-3"
             title="On-time rate"

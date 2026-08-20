@@ -16,6 +16,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { RankedBarChart } from "@/components/charts/ranked-bar-chart";
 import {
+  useDisplayCurrency,
   useClients,
   useGateQueue,
   useHouseScores,
@@ -88,7 +89,7 @@ export default function HomePage() {
     [orders.data, scope.houseId],
   );
 
-  const currency = scoped[0]?.currency ?? "USD";
+  const currency = useDisplayCurrency();
   const nowMs = now || Date.now();
 
   const kpis = React.useMemo(() => {

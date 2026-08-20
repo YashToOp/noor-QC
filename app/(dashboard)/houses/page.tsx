@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/skeleton";
-import { useAppUsers, useHouseScores, useHouses, useOrders } from "@/lib/queries";
+import { useDisplayCurrency, useAppUsers, useHouseScores, useHouses, useOrders } from "@/lib/queries";
 import { searchParties } from "@/lib/search";
 import { orderBook } from "@/lib/profile";
 import type { House, HouseScore } from "@/lib/types";
@@ -56,7 +56,7 @@ export default function HousesPage() {
     [orders.data],
   );
 
-  const currency = (orders.data ?? [])[0]?.currency ?? "USD";
+  const currency = useDisplayCurrency();
 
   const columns: Column<House>[] = [
     {

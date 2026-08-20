@@ -57,6 +57,8 @@ export interface Tenant {
   slug: string;
   name: string;
   name_ar: string | null;
+  /** The tenant's own currency — the right display fallback, not a hardcoded one. */
+  default_currency: string | null;
 }
 
 export interface Client {
@@ -91,6 +93,7 @@ export interface HouseScore {
 export interface ManufacturerOrder {
   id: string;
   tenant_id: string;
+  enquiry_id: string | null;
   client_id: string | null;
   house_id: string | null;
   number: string;
@@ -127,6 +130,7 @@ export interface Style {
   lead_time_days: number | null;
   moq_packs: number | null;
   base_price: number | null;
+  currency: string | null;
 }
 
 export interface Colourway {

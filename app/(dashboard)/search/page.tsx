@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAppUsers, useClients, useHouses, useOrders } from "@/lib/queries";
+import { useDisplayCurrency, useAppUsers, useClients, useHouses, useOrders } from "@/lib/queries";
 import { searchParties, type SearchHit } from "@/lib/search";
 import { orderBook } from "@/lib/profile";
 import { formatCount, formatMoney } from "@/lib/format";
@@ -47,7 +47,7 @@ function SearchResults() {
   );
 
   const loading = clients.isLoading || houses.isLoading || users.isLoading;
-  const currency = (orders.data ?? [])[0]?.currency ?? "USD";
+  const currency = useDisplayCurrency();
 
   const bookFor = (hit: SearchHit) =>
     orderBook(

@@ -18,17 +18,25 @@ export function formatCount(n: number | null | undefined): string {
   return new Intl.NumberFormat("en-IN").format(Math.round(n));
 }
 
-/** Full precision money — for tables and tooltips only. */
+/**
+ * Full precision money — for tables and tooltips only (§5.2).
+ *
+ * "Full precision" is taken literally: a value with a fractional part keeps its
+ * minor units, because a unit price of 11.60 rounded to 12 is a different
+ * number, not a tidier one. Whole amounts stay whole rather than growing a
+ * pointless `.00`.
+ */
 export function formatMoneyFull(
   n: number | null | undefined,
   currency = "USD",
 ): string {
   if (n === null || n === undefined || Number.isNaN(n)) return UNKNOWN;
+  const hasFraction = Math.abs(n % 1) > Number.EPSILON;
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: hasFraction ? 2 : 0,
+    maximumFractionDigits: hasFraction ? 2 : 0,
   }).format(n);
 }
 
