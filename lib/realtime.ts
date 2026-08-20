@@ -59,12 +59,15 @@ export function useRealtimeInvalidation() {
         (payload) => {
           const orderId = (payload.new as { manufacturer_order_id?: string } | null)
             ?.manufacturer_order_id;
-          invalidate([qk.events]);
+          // A completed stage is what opens a stage_verify gate, and the last
+          // one completing is what opens a dispatch gate — so the queue has to
+          // re-derive on every ladder change, not just the timeline.
+          invalidate([qk.events, qk.gateQueue]);
           if (orderId) invalidate([qk.order(orderId)]);
         },
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "approvals" }, () => {
-        invalidate([qk.orders]);
+        invalidate([qk.approvals, qk.orders, qk.gateQueue]);
       })
       .subscribe();
 
@@ -75,16 +78,18 @@ export function useRealtimeInvalidation() {
 }
 
 /**
- * "The gate opens automatically on approve."
+ * "The gate opens automatically."
  *
  * Neither Flutter app writes `order_reviews`, and the write map gives QC
- * "creates + decides" — so this dashboard opens the review row itself the
- * moment an order reaches `approved`.
+ * "creates + decides" — so this dashboard opens the gate row itself whenever
+ * the world reaches a state that calls for one: an order hitting `approved`, a
+ * flagged stage being completed, a ladder finishing. `deriveOpenableGates`
+ * decides which; the queue query has already surfaced them as rows, so this
+ * only has to write them down.
  *
- * `openGate` is idempotent at the database level (it re-reads before
- * inserting, and its status update is guarded on `status = 'approved'`); the
- * in-flight ref here just avoids firing the same request twice while the first
- * is still on the wire.
+ * `openGate` is idempotent twice over — it re-reads before inserting, and the
+ * partial unique index refuses a duplicate open gate — so the in-flight set
+ * here is just to avoid firing the same request twice while one is on the wire.
  */
 export function useAutoOpenGates(rows: GateRow[] | undefined) {
   const qc = useQueryClient();
@@ -92,22 +97,20 @@ export function useAutoOpenGates(rows: GateRow[] | undefined) {
 
   useEffect(() => {
     if (!rows?.length) return;
-    const unopened = rows.filter(
-      (r) => !r.review && r.order.status === "approved" && !inFlight.current.has(r.order.id),
-    );
+    const unopened = rows.filter((r) => !r.review && !inFlight.current.has(r.key));
     if (!unopened.length) return;
 
     let cancelled = false;
-    for (const row of unopened) inFlight.current.add(row.order.id);
+    for (const row of unopened) inFlight.current.add(row.key);
 
-    Promise.allSettled(unopened.map((row) => openGate(row.order)))
+    Promise.allSettled(unopened.map((row) => openGate(row.order, row.gateType)))
       .then(() => {
         if (cancelled) return;
         qc.invalidateQueries({ queryKey: qk.gateQueue });
         qc.invalidateQueries({ queryKey: qk.orders });
       })
       .finally(() => {
-        for (const row of unopened) inFlight.current.delete(row.order.id);
+        for (const row of unopened) inFlight.current.delete(row.key);
       });
 
     return () => {

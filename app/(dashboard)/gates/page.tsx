@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Inbox, MoreHorizontal } from "lucide-react";
+import { Inbox, MoreHorizontal, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shell/page-header";
 import { ScopeBar, useScope } from "@/components/shell/scope-bar";
 import { MetricCard } from "@/components/ui/metric-card";
@@ -10,19 +10,25 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { Dialog } from "@/components/ui/dialog";
+import { Select } from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
 import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { MetricSkeleton, TableSkeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
+  useAllReviews,
   useGateQueue,
   useIssues,
   useOrders,
   useProductionEvents,
   useProductionStages,
+  qk,
   type GateRow,
 } from "@/lib/queries";
 import { useAutoOpenGates, useNow } from "@/lib/realtime";
-import { GATE_TYPE_LABEL, gateStatus, waitingSince } from "@/lib/gates";
+import { useQueryClient } from "@tanstack/react-query";
+import { GATE_TYPE_LABEL, gateStatus, openGate, waitingSince } from "@/lib/gates";
 import { gateBadge } from "@/lib/status";
 import {
   delta,
@@ -54,7 +60,14 @@ export default function GateQueuePage() {
   const now = useNow();
   const { scope, setRange, setGateType, setHouseId } = useScope("last30");
 
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [raising, setRaising] = React.useState(false);
+  const [raiseOrderId, setRaiseOrderId] = React.useState("");
+  const [raiseBusy, setRaiseBusy] = React.useState(false);
+
   const queue = useGateQueue();
+  const reviews = useAllReviews();
   const orders = useOrders();
   const events = useProductionEvents();
   const stages = useProductionStages();
@@ -66,9 +79,7 @@ export default function GateQueuePage() {
     const all = queue.data ?? [];
     const filtered = all.filter((r) => {
       if (scope.houseId !== "all" && r.order.house_id !== scope.houseId) return false;
-      // Every gate `order_reviews` can express is an order review; the filter
-      // still narrows correctly once a gate_type column exists.
-      if (scope.gateType !== "all" && scope.gateType !== "order_review") return false;
+      if (scope.gateType !== "all" && r.gateType !== scope.gateType) return false;
       return true;
     });
     // Oldest waiting first — the whole point of a queue.
@@ -84,17 +95,16 @@ export default function GateQueuePage() {
     const allEvents = events.data ?? [];
     const allIssues = issues.data ?? [];
     const allStages = stages.data ?? [];
-    const reviews = (queue.data ?? [])
-      .map((r) => r.review)
-      .filter(Boolean) as NonNullable<GateRow["review"]>[];
-
     const prev = previousWindow(scope.range);
     const nowMs = now || Date.now();
     const prevMs = prev.to.getTime();
 
     const awaiting: Kpi = {
-      value: pendingGatesAt(reviews, allOrders, nowMs, true),
-      previous: pendingGatesAt(reviews, allOrders, prevMs, false),
+      // The present count is the queue itself — it already includes gates that
+      // are being opened this instant. The comparison is reconstructed from
+      // every review's started_at / decided_at.
+      value: rows.length,
+      previous: pendingGatesAt(reviews.data ?? [], prevMs),
     };
     const production: Kpi = {
       value: allOrders.filter((o) => o.status === "in_production").length,
@@ -110,21 +120,53 @@ export default function GateQueuePage() {
     };
 
     return { awaiting, production, atRisk, onTime };
-  }, [orders.data, events.data, issues.data, stages.data, queue.data, scope.range, now]);
+  }, [orders.data, events.data, issues.data, stages.data, reviews.data, rows.length, scope.range, now]);
 
   const currency = (orders.data ?? [])[0]?.currency ?? "USD";
   const loading = queue.isLoading || orders.isLoading;
+
+  /**
+   * Raise a sample gate by hand.
+   *
+   * The other three gate types open themselves — `deriveOpenableGates` can see
+   * their triggers in the data. A sample gate's trigger is "the seller submits
+   * a sample", which Sharik does not do in V1, and `approval_status` has no
+   * "awaiting QC release" member to stand in for one. So until that write
+   * exists, this is how a sample gate gets raised.
+   */
+  const raiseSampleGate = async () => {
+    const order = (orders.data ?? []).find((o) => o.id === raiseOrderId);
+    if (!order) return;
+    setRaiseBusy(true);
+    try {
+      await openGate(order, "sample_release");
+      qc.invalidateQueries({ queryKey: qk.gateQueue });
+      qc.invalidateQueries({ queryKey: qk.reviews });
+      toast({ tone: "success", title: `Sample gate raised on ${order.number}` });
+      setRaising(false);
+      setRaiseOrderId("");
+    } catch (e) {
+      toast({ tone: "error", title: "Couldn't raise the gate", description: (e as Error).message });
+    } finally {
+      setRaiseBusy(false);
+    }
+  };
+
+  // Terminal orders cannot take a new gate.
+  const raisableOrders = (orders.data ?? []).filter(
+    (o) => !["declined", "cancelled", "closed", "quoting"].includes(o.status),
+  );
 
   const columns: Column<GateRow>[] = [
     {
       id: "gateType",
       header: "Gate type",
-      render: () => (
+      render: (r) => (
         <span className="inline-flex h-5 items-center rounded-sm bg-well px-1.5 text-xs font-medium text-ink-secondary">
-          {GATE_TYPE_LABEL.order_review}
+          {GATE_TYPE_LABEL[r.gateType]}
         </span>
       ),
-      sortValue: () => GATE_TYPE_LABEL.order_review,
+      sortValue: (r) => GATE_TYPE_LABEL[r.gateType],
       width: "132px",
     },
     {
@@ -183,7 +225,7 @@ export default function GateQueuePage() {
             </Button>
           }
           items={[
-            { label: "Open gate", onSelect: () => router.push(`/gates/${r.order.id}`) },
+            { label: "Open gate", onSelect: () => router.push(`/gates/${r.key}`) },
             { label: "View order", onSelect: () => router.push(`/orders/${r.order.id}`) },
           ]}
         />
@@ -201,6 +243,11 @@ export default function GateQueuePage() {
         onGateTypeChange={setGateType}
         onHouseChange={setHouseId}
         showGateType
+        actions={
+          <Button variant="secondary" icon={<Plus />} onClick={() => setRaising(true)}>
+            Raise sample gate
+          </Button>
+        }
       />
 
       {/* The panel is the only scroll container (§4.1). */}
@@ -271,13 +318,13 @@ export default function GateQueuePage() {
                 caption="Gates awaiting a decision, oldest first"
                 columns={columns}
                 rows={rows}
-                rowKey={(r) => r.order.id}
-                onRowClick={(r) => router.push(`/gates/${r.order.id}`)}
+                rowKey={(r) => r.key}
+                onRowClick={(r) => router.push(`/gates/${r.key}`)}
                 empty={
                   <EmptyState
                     icon={<Inbox />}
                     title="Nothing awaiting approval"
-                    description="Every gate has been decided. New ones arrive here the moment a client approves a proforma."
+                    description="Every gate has been decided. New ones arrive the moment a client approves a proforma, a house finishes a stage, or an order is ready to ship."
                     action={{ label: "View all orders", onClick: () => router.push("/orders") }}
                   />
                 }
@@ -286,6 +333,36 @@ export default function GateQueuePage() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={raising}
+        onClose={() => setRaising(false)}
+        title="Raise a sample gate"
+        description="Order review, stage verify and dispatch gates open themselves. A sample gate waits on the house submitting a sample, which Sharik does not do yet — so raise it here."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRaising(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!raiseOrderId}
+              loading={raiseBusy}
+              onClick={raiseSampleGate}
+            >
+              Raise gate
+            </Button>
+          </>
+        }
+      >
+        <Select
+          label="Order"
+          value={raiseOrderId}
+          onChange={setRaiseOrderId}
+          placeholder="Choose an order"
+          options={raisableOrders.map((o) => ({ value: o.id, label: o.number }))}
+        />
+      </Dialog>
     </>
   );
 }

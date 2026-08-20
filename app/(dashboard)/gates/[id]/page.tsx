@@ -16,30 +16,46 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { useGateDetail, useProductionStages, qk } from "@/lib/queries";
 import {
-  ORDER_REVIEW_CHECKS,
+  CHECKS_BY_TYPE,
+  GATE_ACTIONS,
+  GATE_TYPE_LABEL,
+  GATE_TYPE_PURPOSE,
   allChecked,
-  approveGate,
+  decideGate,
   emptyChecks,
   gateStatus,
   openGate,
-  queryGate,
-  rejectGate,
   saveChecks,
+  subjectApproval,
+  subjectEvent,
+  type GateOutcome,
+  type GateType,
 } from "@/lib/gates";
 import { gateBadge, issueBadge, STATUS_LABEL } from "@/lib/status";
 import type { ChecklistState, MoStatus } from "@/lib/types";
-import { formatCount, formatDate, formatMoney, formatMoneyFull, formatPercent, UNKNOWN } from "@/lib/format";
+import {
+  formatCount,
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  formatMoneyFull,
+  formatPercent,
+  UNKNOWN,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
- * GATE DETAIL — build prompt §5.2.
+ * GATE DETAIL — build prompt §5.2, now covering all four gate types.
  *
  * Two columns inside the panel: the decision on the left, the context on the
- * right. The left column is the approval stepper (§7.6), the checklist in a
- * bg-well well, and the actions right-aligned with the primary last (§5.9).
+ * right. The left column is the approval stepper (§7.6), the gate's own
+ * checklist in a bg-well well, and the actions right-aligned with the primary
+ * last (§5.9).
  *
- * `Approve` is the one filled primary button on the screen (Part E). Reject is
- * destructive and Query is secondary, so the density rule holds.
+ * `Approve` is the one filled primary button on the screen (Part E). Which
+ * other actions appear comes from the contract's gate table, via GATE_ACTIONS:
+ * an order review can be queried or rejected, a sample can only be rejected, a
+ * stage can only be queried, and a dispatch can only be held.
  */
 
 /** The six steps an order walks, and where this order currently stands. */
@@ -65,35 +81,34 @@ function buildSteps(status: MoStatus): Step[] {
 
 export default function GateDetailPage() {
   const params = useParams<{ id: string }>();
-  const orderId = params.id;
+  const gateKey = decodeURIComponent(params.id);
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
 
-  const detail = useGateDetail(orderId);
+  const detail = useGateDetail(gateKey);
   const stages = useProductionStages();
 
   const [checks, setChecks] = React.useState<ChecklistState | null>(null);
-  const [busy, setBusy] = React.useState<null | "approve" | "query" | "reject">(null);
-  const [prompt, setPrompt] = React.useState<null | "query" | "reject">(null);
+  const [busy, setBusy] = React.useState<null | GateOutcome>(null);
+  const [prompt, setPrompt] = React.useState<null | "query" | "rejected">(null);
   const [note, setNote] = React.useState("");
 
   // Seed the local checklist from the row, once the row lands.
   React.useEffect(() => {
     if (detail.data && checks === null) {
-      setChecks(detail.data.review?.checks ?? emptyChecks());
+      setChecks(detail.data.review?.checks ?? emptyChecks(detail.data.gateType));
     }
   }, [detail.data, checks]);
 
-  // If the client approved but the gate was never opened (e.g. this page was
-  // deep-linked before the queue rendered), open it here too.
+  // Deep-linked before the queue had a chance to open the gate: open it here.
   React.useEffect(() => {
-    const order = detail.data?.order;
-    if (!order || detail.data?.review || order.status !== "approved") return;
-    openGate(order)
-      .then(() => qc.invalidateQueries({ queryKey: qk.gate(orderId) }))
+    const data = detail.data;
+    if (!data || data.review) return;
+    openGate(data.order, data.gateType)
+      .then(() => qc.invalidateQueries({ queryKey: qk.gate(gateKey) }))
       .catch(() => undefined);
-  }, [detail.data, orderId, qc]);
+  }, [detail.data, gateKey, qc]);
 
   if (detail.isError) {
     return (
@@ -127,12 +142,18 @@ export default function GateDetailPage() {
     );
   }
 
-  const { order, review, client, house, scores, lines, limit, issues } = detail.data;
+  const { order, review, client, house, scores, lines, limit, issues, events, approvals, gateType } =
+    detail.data;
   const status = gateStatus(order, review);
   const decided = Boolean(review?.decided_at);
   const score = scores[0];
   const openIssues = issues.filter((i) => i.status !== "resolved" && i.status !== "rejected");
   const totalPcs = lines.reduce((sum, l) => sum + (l.pcs ?? 0), 0);
+  const actions = GATE_ACTIONS[gateType];
+
+  // The subject each gate is about, derived rather than stored (see lib/gates.ts).
+  const sample = gateType === "sample_release" ? subjectApproval(approvals) : null;
+  const stageEvent = gateType === "stage_verify" ? subjectEvent(events) : null;
 
   const toggle = async (key: string) => {
     if (decided || !review) return;
@@ -151,49 +172,31 @@ export default function GateDetailPage() {
   };
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: qk.gate(orderId) });
+    qc.invalidateQueries({ queryKey: qk.gate(gateKey) });
     qc.invalidateQueries({ queryKey: qk.gateQueue });
+    qc.invalidateQueries({ queryKey: qk.reviews });
     qc.invalidateQueries({ queryKey: qk.orders });
     qc.invalidateQueries({ queryKey: qk.events });
+    qc.invalidateQueries({ queryKey: qk.approvals });
   };
 
-  const onApprove = async () => {
+  const decide = async (outcome: GateOutcome, reason?: string) => {
     if (!review) return;
-    setBusy("approve");
+    setBusy(outcome);
     try {
-      await approveGate({
+      await decideGate({
         review,
         order,
+        outcome,
+        checks,
+        note: reason,
         stages: stages.data ?? [],
         totalPcs,
-        checks,
+        events,
+        approvals,
       });
       refresh();
-      toast({
-        tone: "success",
-        title: `${order.number} released`,
-        description: "The production stages are created and the house can see the order now.",
-      });
-      router.push("/gates");
-    } catch (e) {
-      toast({ tone: "error", title: "Couldn't approve", description: (e as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const onDecide = async (kind: "query" | "reject") => {
-    if (!review || !note.trim()) return;
-    setBusy(kind);
-    try {
-      const args = { review, order, checks, note: note.trim() };
-      if (kind === "query") await queryGate(args);
-      else await rejectGate(args);
-      refresh();
-      toast({
-        tone: "success",
-        title: kind === "query" ? "Sent back to the client" : `${order.number} rejected`,
-      });
+      toast({ tone: "success", title: successMessage(gateType, outcome, order.number) });
       setPrompt(null);
       setNote("");
       router.push("/gates");
@@ -204,12 +207,12 @@ export default function GateDetailPage() {
     }
   };
 
-  const ready = allChecked(checks);
+  const ready = allChecked(gateType, checks);
 
   return (
     <>
       <PageHeader
-        title={order.number}
+        title={`${GATE_TYPE_LABEL[gateType]} · ${order.number}`}
         breadcrumb={[{ label: "Gate queue", href: "/gates" }]}
         actions={<StatusBadge spec={gateBadge(status)} dot />}
       />
@@ -218,13 +221,15 @@ export default function GateDetailPage() {
         <div className="grid grid-cols-12 items-start gap-4 pt-3 pb-4">
           {/* ── LEFT: the decision ─────────────────────────────── */}
           <div className="col-span-7 flex flex-col gap-4">
-            <Card title="Order review">
+            <Card title={GATE_TYPE_LABEL[gateType]}>
+              <p className="-mt-3 text-xs text-ink-secondary">{GATE_TYPE_PURPOSE[gateType]}</p>
+
               <Stepper steps={buildSteps(order.status)} className="pt-1" />
 
               {/* The checklist, in a 12px bg-well well. */}
               <div className="mt-2 rounded-lg bg-well p-3">
                 <ul className="flex flex-col">
-                  {ORDER_REVIEW_CHECKS.map((check) => {
+                  {CHECKS_BY_TYPE[gateType].map((check) => {
                     const ticked = checks[check.key] === true;
                     return (
                       <li key={check.key}>
@@ -272,7 +277,7 @@ export default function GateDetailPage() {
 
               {!ready && !decided && (
                 <p className="text-xs text-ink-secondary">
-                  All six checks must be confirmed before this order can be released.
+                  Every check must be confirmed before this gate can be approved.
                 </p>
               )}
 
@@ -295,30 +300,34 @@ export default function GateDetailPage() {
                 </p>
               ) : (
                 <div className="flex items-center justify-end gap-2">
-                  <Button
-                    variant="destructive"
-                    onClick={() => {
-                      setPrompt("reject");
-                      setNote("");
-                    }}
-                    disabled={busy !== null || prompt !== null}
-                  >
-                    Reject
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setPrompt("query");
-                      setNote("");
-                    }}
-                    disabled={busy !== null || prompt !== null}
-                  >
-                    Query
-                  </Button>
+                  {actions.reject && (
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        setPrompt("rejected");
+                        setNote("");
+                      }}
+                      disabled={busy !== null || prompt !== null}
+                    >
+                      Reject
+                    </Button>
+                  )}
+                  {actions.secondary && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setPrompt("query");
+                        setNote("");
+                      }}
+                      disabled={busy !== null || prompt !== null}
+                    >
+                      {actions.secondary}
+                    </Button>
+                  )}
                   <Button
                     variant="primary"
-                    onClick={onApprove}
-                    loading={busy === "approve"}
+                    onClick={() => decide("passed")}
+                    loading={busy === "passed"}
                     disabled={!ready || busy !== null || prompt !== null || !review}
                   >
                     Approve
@@ -330,6 +339,60 @@ export default function GateDetailPage() {
 
           {/* ── RIGHT: the context ─────────────────────────────── */}
           <div className="col-span-5 flex flex-col gap-4">
+            {sample && (
+              <Card title="The sample">
+                <div className="flex items-center gap-3">
+                  <span
+                    className="size-10 shrink-0 rounded-md border-hairline border-line"
+                    style={{ background: sample.swatch_ref ?? "var(--bg-well)" }}
+                    aria-hidden
+                  />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium text-ink">
+                      {sample.title ?? UNKNOWN}
+                    </span>
+                    <span className="truncate text-xs text-ink-secondary">
+                      {sample.type.replace(/_/g, " ")}
+                      {sample.lighting ? ` · ${sample.lighting}` : ""}
+                    </span>
+                  </span>
+                </div>
+                <dl className="flex flex-col gap-3 text-sm">
+                  <Row label="Current state" value={sample.status.replace(/_/g, " ")} />
+                  <Row label="Due" value={sample.due_at ? formatDate(sample.due_at) : UNKNOWN} />
+                </dl>
+                <p className="text-xs text-ink-secondary">
+                  Approving puts this in front of the client on their phone.
+                </p>
+              </Card>
+            )}
+
+            {stageEvent && (
+              <Card title="The stage">
+                <dl className="flex flex-col gap-3 text-sm">
+                  <Row
+                    label="Stage"
+                    value={events.find((e) => e.id === stageEvent.id)?.stage?.name ?? UNKNOWN}
+                  />
+                  <Row label="Pieces in" value={formatCount(stageEvent.qty_in)} />
+                  <Row label="Pieces out" value={formatCount(stageEvent.qty_out)} />
+                  <Row
+                    label="Completed"
+                    value={
+                      stageEvent.completed_at ? formatDateTime(stageEvent.completed_at) : UNKNOWN
+                    }
+                  />
+                  <Row
+                    label="Was due"
+                    value={stageEvent.expected_at ? formatDate(stageEvent.expected_at) : UNKNOWN}
+                  />
+                </dl>
+                <p className="text-xs text-ink-secondary">
+                  Querying sends the stage back to the house to redo.
+                </p>
+              </Card>
+            )}
+
             <Card title="Order lines">
               <ul className="flex flex-col gap-3">
                 {lines.map((line) => (
@@ -435,31 +498,29 @@ export default function GateDetailPage() {
       <Dialog
         open={prompt !== null}
         onClose={() => setPrompt(null)}
-        title={prompt === "reject" ? "Reject this order" : "Send a query to the client"}
-        description={
-          prompt === "reject"
-            ? "This is terminal. The reason is recorded against the order and shown to the client."
-            : "The order goes back to the client with your question."
-        }
+        title={promptTitle(gateType, prompt)}
+        description={promptDescription(gateType, prompt)}
         footer={
           <>
             <Button variant="ghost" onClick={() => setPrompt(null)}>
               Cancel
             </Button>
             <Button
-              variant={prompt === "reject" ? "destructive" : "primary"}
+              variant={prompt === "rejected" ? "destructive" : "primary"}
               disabled={!note.trim()}
               loading={busy === prompt}
-              onClick={() => onDecide(prompt!)}
+              onClick={() => decide(prompt!, note.trim())}
             >
-              {prompt === "reject" ? "Reject order" : "Send query"}
+              {promptConfirm(gateType, prompt)}
             </Button>
           </>
         }
       >
         <Input
           label="Reason"
-          placeholder={prompt === "reject" ? "Why this cannot proceed" : "What you need from the client"}
+          placeholder={
+            prompt === "rejected" ? "Why this cannot proceed" : "What needs to change, and by whom"
+          }
           value={note}
           onChange={(e) => setNote(e.target.value)}
           autoFocus
@@ -467,6 +528,50 @@ export default function GateDetailPage() {
       </Dialog>
     </>
   );
+}
+
+function successMessage(type: GateType, outcome: GateOutcome, number: string): string {
+  if (outcome === "passed") {
+    switch (type) {
+      case "order_review":
+        return `${number} released to the house`;
+      case "sample_release":
+        return "Sample sent to the client";
+      case "stage_verify":
+        return "Stage verified";
+      case "dispatch":
+        return `${number} cleared to ship`;
+    }
+  }
+  if (outcome === "rejected") return `${number} rejected`;
+  return type === "dispatch" ? `${number} held` : "Sent back";
+}
+
+function promptTitle(type: GateType, prompt: "query" | "rejected" | null): string {
+  if (prompt === "rejected") {
+    return type === "sample_release" ? "Reject this sample" : "Reject this order";
+  }
+  if (type === "dispatch") return "Hold this shipment";
+  if (type === "stage_verify") return "Send this stage back";
+  return "Send a query to the client";
+}
+
+function promptDescription(type: GateType, prompt: "query" | "rejected" | null): string {
+  if (prompt === "rejected") {
+    return type === "sample_release"
+      ? "The sample goes back to the house for a re-dye rather than to the client."
+      : "This is terminal. The reason is recorded against the order and shown to the client.";
+  }
+  if (type === "dispatch") return "The order stays where it is and does not ship.";
+  if (type === "stage_verify") return "The stage stops counting as done and the house must redo it.";
+  return "The order goes back to the client with your question.";
+}
+
+function promptConfirm(type: GateType, prompt: "query" | "rejected" | null): string {
+  if (prompt === "rejected") return type === "sample_release" ? "Reject sample" : "Reject order";
+  if (type === "dispatch") return "Hold shipment";
+  if (type === "stage_verify") return "Send back";
+  return "Send query";
 }
 
 function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {

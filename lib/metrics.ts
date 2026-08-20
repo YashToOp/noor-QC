@@ -47,28 +47,21 @@ export function previousWindow(range: DateRange): DateRange {
 const at = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : null);
 
 /**
- * Gates pending as at `t`: a review opened by then and not yet decided by then.
- * Orders sitting at `approved` with no review row are pending now — the gate
- * has not been opened yet — so they count only against the present.
+ * Gates pending as at `t`: opened by then, not yet decided by then.
+ *
+ * This is the *historical* count, used for the comparison figure. The present
+ * count is not reconstructed — it is the length of the queue itself, which
+ * also picks up gates that ought to be open but have not been written down
+ * yet. Pass every review, decided ones included: a gate decided yesterday was
+ * still pending last week.
  */
-export function pendingGatesAt(
-  reviews: OrderReview[],
-  orders: ManufacturerOrder[],
-  t: number,
-  isNow: boolean,
-): number {
-  const open = reviews.filter((r) => {
+export function pendingGatesAt(reviews: OrderReview[], t: number): number {
+  return reviews.filter((r) => {
     const started = at(r.started_at);
     if (started === null || started > t) return false;
     const decided = at(r.decided_at);
     return decided === null || decided > t;
   }).length;
-
-  if (!isNow) return open;
-
-  const reviewed = new Set(reviews.map((r) => r.manufacturer_order_id));
-  const unopened = orders.filter((o) => o.status === "approved" && !reviewed.has(o.id)).length;
-  return open + unopened;
 }
 
 /**

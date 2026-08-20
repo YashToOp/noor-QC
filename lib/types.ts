@@ -196,18 +196,57 @@ export interface WorkingLimit {
   status: string;
 }
 
+/** `approval_status`. */
+export type ApprovalStatus =
+  | "pending"
+  | "approved"
+  | "revision_requested"
+  | "conditional"
+  | "superseded"
+  | "expired";
+
+/** `approval_type`. */
+export type ApprovalType = "lab_dip" | "pp_sample" | "size_set" | "inspection" | "artwork";
+
+/**
+ * `approvals` — a sample or shade put to the client.
+ *
+ * Majlis subscribes to this table filtered on `status = 'pending'`, so moving
+ * a row there is what makes the sample visible to the client. That is exactly
+ * the effect a `sample_release` gate applies when it passes.
+ */
+export interface Approval {
+  id: string;
+  manufacturer_order_id: string | null;
+  order_line_id: string | null;
+  type: ApprovalType;
+  title: string | null;
+  swatch_ref: string | null;
+  lighting: string | null;
+  due_at: string | null;
+  status: ApprovalStatus;
+  decision: string | null;
+  reason: string | null;
+  decided_at: string | null;
+}
+
+/** `gate_type` — the discriminator that lets `order_reviews` hold all four gates. */
+export type GateTypeValue = "order_review" | "sample_release" | "stage_verify" | "dispatch";
+
 /**
  * `order_reviews` — the gate.
  *
- * This is the table the queue is built on. It carries the gate's substance
- * (`checks`, `note`, `decided_at`, a reviewer) but has no `gate_type` column,
- * so every gate it can express is an Order review. See the note in
- * lib/gates.ts for how that shapes the queue.
+ * The table is named for the first gate that existed, but `gate_type` now
+ * discriminates all four the contract describes. It carries the gate's
+ * substance (`checks`, `note`, `decided_at`, a reviewer) and no subject
+ * column — see lib/gates.ts for how each gate's subject is derived, and why a
+ * partial unique index is what makes that safe.
  */
 export interface OrderReview {
   id: string;
   tenant_id: string;
   manufacturer_order_id: string;
+  gate_type: GateTypeValue;
   checks: ChecklistState | null;
   outcome: ReviewOutcome | null;
   note: string | null;

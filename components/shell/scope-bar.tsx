@@ -67,8 +67,8 @@ export function ScopeBar({
     ...(houses.data ?? []).map((h) => ({ value: h.id, label: h.name })),
   ];
 
-  // Only `order_review` exists today — `order_reviews` has no gate_type column,
-  // so the other three are listed but disabled rather than silently absent.
+  // All four are real since `gate_type` was added, so the filter narrows on
+  // the row's actual type.
   const gateTypeOptions = [
     { value: "all", label: "All gate types" },
     ...(Object.keys(GATE_TYPE_LABEL) as GateType[]).map((t) => ({

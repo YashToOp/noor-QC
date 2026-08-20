@@ -25,7 +25,7 @@ import {
   useOrders,
   useProductionEvents,
   useProductionStages,
-  type GateRow,
+  useAllReviews,
 } from "@/lib/queries";
 import { useNow } from "@/lib/realtime";
 import { orderBadge } from "@/lib/status";
@@ -78,6 +78,7 @@ export default function HomePage() {
   const scores = useHouseScores();
   const clients = useClients();
   const queue = useGateQueue();
+  const reviews = useAllReviews();
 
   const scoped = React.useMemo(
     () =>
@@ -94,15 +95,15 @@ export default function HomePage() {
     const allEvents = events.data ?? [];
     const allIssues = issues.data ?? [];
     const allStages = stages.data ?? [];
-    const reviews = (queue.data ?? [])
-      .map((r) => r.review)
-      .filter(Boolean) as NonNullable<GateRow["review"]>[];
     const prev = previousWindow(scope.range);
     const prevMs = prev.to.getTime();
 
     const awaiting: Kpi = {
-      value: pendingGatesAt(reviews, scoped, nowMs, true),
-      previous: pendingGatesAt(reviews, scoped, prevMs, false),
+      // The present count is the queue itself — it already includes gates that
+      // are being opened this instant. The comparison is reconstructed from
+      // every review's started_at / decided_at.
+      value: queue.data?.length ?? 0,
+      previous: pendingGatesAt(reviews.data ?? [], prevMs),
     };
     const production: Kpi = {
       value: scoped.filter((o) => o.status === "in_production").length,
@@ -117,7 +118,7 @@ export default function HomePage() {
       previous: onTimeRate(scoped, allEvents, allStages, prev),
     };
     return { awaiting, production, atRisk, onTime };
-  }, [scoped, events.data, issues.data, stages.data, queue.data, scope.range, nowMs]);
+  }, [scoped, events.data, issues.data, stages.data, queue.data, reviews.data, scope.range, nowMs]);
 
   /**
    * Orders released per week.
