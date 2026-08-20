@@ -84,6 +84,7 @@ export interface HouseScore {
   on_time_pct: number | null;
   defect_pct: number | null;
   avg_approval_turnaround_hours: number | null;
+  claims_count: number | null;
   orders_count: number | null;
 }
 
@@ -194,6 +195,94 @@ export interface WorkingLimit {
   currency: string;
   committed: number | null;
   status: string;
+}
+
+/**
+ * `app_users` — the people attached to a party.
+ *
+ * This is the only table carrying a phone number: neither `clients` nor
+ * `houses` has one, so a contact is how a party is reachable and how a phone
+ * search resolves to a party.
+ */
+export interface AppUser {
+  id: string;
+  role: string;
+  client_id: string | null;
+  house_id: string | null;
+  display_name: string | null;
+  phone: string | null;
+  locale: string | null;
+  order_value_limit: number | null;
+  status: string;
+}
+
+export interface Invoice {
+  id: string;
+  client_id: string | null;
+  manufacturer_order_id: string | null;
+  number: string;
+  amount: number | null;
+  currency: string;
+  issued_at: string | null;
+  due_at: string | null;
+}
+
+export interface Payment {
+  id: string;
+  client_id: string | null;
+  amount: number | null;
+  currency: string;
+  method: string | null;
+  reference: string | null;
+  received_at: string | null;
+}
+
+export interface CreditNote {
+  id: string;
+  client_id: string | null;
+  manufacturer_order_id: string | null;
+  issue_id: string | null;
+  number: string;
+  amount: number | null;
+  currency: string;
+  reason: string | null;
+  issued_at: string | null;
+}
+
+/** `ledger_kind` — how a ledger row moves the balance. */
+export type LedgerKind = "invoice" | "payment" | "credit_note" | "adjustment";
+
+export interface LedgerEntry {
+  id: string;
+  client_id: string | null;
+  kind: LedgerKind;
+  ref_type: string | null;
+  ref_id: string | null;
+  amount: number | null;
+  currency: string;
+  occurred_at: string | null;
+  description: string | null;
+}
+
+export interface Enquiry {
+  id: string;
+  client_id: string | null;
+  basket_id: string | null;
+  number: string;
+  requested_delivery_from: string | null;
+  requested_delivery_to: string | null;
+  status: string;
+  submitted_at: string | null;
+}
+
+/** `events` — the audit log. Seeded empty; see lib/profile.ts. */
+export interface AuditEvent {
+  id: number;
+  actor_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  action: string | null;
+  created_at: string | null;
 }
 
 /** `approval_status`. */

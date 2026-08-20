@@ -5,15 +5,22 @@ import { supabase } from "./supabase";
 import { deriveOpenableGates, type GateType } from "./gates";
 import type {
   Approval,
+  AppUser,
+  AuditEvent,
   Client,
   Colourway,
+  CreditNote,
+  Enquiry,
   House,
   HouseScore,
   Issue,
+  Invoice,
   IssueType,
+  LedgerEntry,
   ManufacturerOrder,
   OrderLine,
   OrderReview,
+  Payment,
   ProductionEvent,
   ProductionStage,
   Style,
@@ -36,6 +43,9 @@ export const qk = {
   events: ["production-events"] as const,
   approvals: ["approvals"] as const,
   reviews: ["order-reviews"] as const,
+  appUsers: ["app-users"] as const,
+  clientProfile: (id: string) => ["client-profile", id] as const,
+  houseProfile: (id: string) => ["house-profile", id] as const,
 };
 
 async function must<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
@@ -99,7 +109,7 @@ export function useHouseScores() {
         supabase()
           .from("house_scores")
           .select(
-            "house_id, period_start, period_end, on_time_pct, defect_pct, avg_approval_turnaround_hours, orders_count",
+            "house_id, period_start, period_end, on_time_pct, defect_pct, avg_approval_turnaround_hours, claims_count, orders_count",
           )
           .order("period_end", { ascending: false }),
       ),
@@ -179,6 +189,237 @@ export function useClients() {
         supabase().from("clients").select("id, code, name, country, city, currency").order("name"),
       ),
     staleTime: 5 * 60_000,
+  });
+}
+
+/** Contacts. The only table with a phone number, so search leans on it. */
+export function useAppUsers() {
+  return useQuery({
+    queryKey: qk.appUsers,
+    queryFn: () =>
+      must<AppUser[]>(
+        supabase()
+          .from("app_users")
+          .select(
+            "id, role, client_id, house_id, display_name, phone, locale, order_value_limit, status",
+          ),
+      ),
+    staleTime: 5 * 60_000,
+  });
+}
+
+const INVOICE_COLUMNS =
+  "id, client_id, manufacturer_order_id, number, amount, currency, issued_at, due_at";
+const PAYMENT_COLUMNS = "id, client_id, amount, currency, method, reference, received_at";
+const CREDIT_COLUMNS =
+  "id, client_id, manufacturer_order_id, issue_id, number, amount, currency, reason, issued_at";
+const LEDGER_COLUMNS =
+  "id, client_id, kind, ref_type, ref_id, amount, currency, occurred_at, description";
+
+export interface ClientProfile {
+  client: Client;
+  contacts: AppUser[];
+  orders: ManufacturerOrder[];
+  houseNames: Map<string, string>;
+  events: ProductionEvent[];
+  stages: ProductionStage[];
+  issues: Issue[];
+  enquiries: Enquiry[];
+  invoices: Invoice[];
+  payments: Payment[];
+  creditNotes: CreditNote[];
+  ledger: LedgerEntry[];
+  limit: WorkingLimit | null;
+  auditEvents: AuditEvent[];
+}
+
+/** Everything the system holds about one client. */
+export function useClientProfile(clientId: string) {
+  return useQuery({
+    queryKey: qk.clientProfile(clientId),
+    queryFn: async (): Promise<ClientProfile | null> => {
+      const db = supabase();
+
+      const clients = await must<Client[]>(
+        db.from("clients").select("id, code, name, country, city, currency").eq("id", clientId),
+      );
+      const client = clients[0];
+      if (!client) return null;
+
+      const orders = await must<ManufacturerOrder[]>(
+        db.from("manufacturer_orders").select(ORDER_COLUMNS).eq("client_id", clientId),
+      );
+      const orderIds = orders.map((o) => o.id);
+
+      const [
+        contacts,
+        houses,
+        stages,
+        issues,
+        enquiries,
+        invoices,
+        payments,
+        creditNotes,
+        ledger,
+        limits,
+        auditEvents,
+      ] = await Promise.all([
+        must<AppUser[]>(
+          db
+            .from("app_users")
+            .select(
+              "id, role, client_id, house_id, display_name, phone, locale, order_value_limit, status",
+            )
+            .eq("client_id", clientId),
+        ),
+        must<House[]>(db.from("houses").select("id, code, name, city, country, specialities")),
+        must<ProductionStage[]>(db.from("production_stages").select(STAGE_COLUMNS).order("sort")),
+        must<Issue[]>(db.from("issues").select(ISSUE_COLUMNS).eq("client_id", clientId)),
+        must<Enquiry[]>(
+          db
+            .from("enquiries")
+            .select(
+              "id, client_id, basket_id, number, requested_delivery_from, requested_delivery_to, status, submitted_at",
+            )
+            .eq("client_id", clientId),
+        ),
+        must<Invoice[]>(db.from("invoices").select(INVOICE_COLUMNS).eq("client_id", clientId)),
+        must<Payment[]>(db.from("payments").select(PAYMENT_COLUMNS).eq("client_id", clientId)),
+        must<CreditNote[]>(db.from("credit_notes").select(CREDIT_COLUMNS).eq("client_id", clientId)),
+        must<LedgerEntry[]>(
+          db
+            .from("ledger_entries")
+            .select(LEDGER_COLUMNS)
+            .eq("client_id", clientId)
+            .order("occurred_at", { ascending: false }),
+        ),
+        must<WorkingLimit[]>(
+          db
+            .from("working_limits")
+            .select("id, client_id, season, amount, currency, committed, status")
+            .eq("client_id", clientId),
+        ),
+        must<AuditEvent[]>(
+          db
+            .from("events")
+            .select("id, actor_id, entity_type, entity_id, action, created_at")
+            .eq("entity_id", clientId),
+        ),
+      ]);
+
+      const events = orderIds.length
+        ? await must<ProductionEvent[]>(
+            db.from("production_events").select(EVENT_COLUMNS).in("manufacturer_order_id", orderIds),
+          )
+        : [];
+
+      return {
+        client,
+        contacts,
+        orders,
+        houseNames: new Map(houses.map((h) => [h.id, h.name])),
+        events,
+        stages,
+        issues,
+        enquiries,
+        invoices,
+        payments,
+        creditNotes,
+        ledger,
+        limit: limits[0] ?? null,
+        auditEvents,
+      };
+    },
+    enabled: Boolean(clientId),
+  });
+}
+
+export interface HouseProfile {
+  house: House;
+  contacts: AppUser[];
+  scores: HouseScore[];
+  orders: ManufacturerOrder[];
+  clientNames: Map<string, string>;
+  events: ProductionEvent[];
+  stages: ProductionStage[];
+  issues: Issue[];
+  styles: Style[];
+  auditEvents: AuditEvent[];
+}
+
+/** Everything the system holds about one manufacturing house. */
+export function useHouseProfile(houseId: string) {
+  return useQuery({
+    queryKey: qk.houseProfile(houseId),
+    queryFn: async (): Promise<HouseProfile | null> => {
+      const db = supabase();
+
+      const houses = await must<House[]>(
+        db.from("houses").select("id, code, name, city, country, specialities").eq("id", houseId),
+      );
+      const house = houses[0];
+      if (!house) return null;
+
+      const orders = await must<ManufacturerOrder[]>(
+        db.from("manufacturer_orders").select(ORDER_COLUMNS).eq("house_id", houseId),
+      );
+      const orderIds = orders.map((o) => o.id);
+
+      const [contacts, scores, clients, stages, issues, styles, auditEvents] = await Promise.all([
+        must<AppUser[]>(
+          db
+            .from("app_users")
+            .select(
+              "id, role, client_id, house_id, display_name, phone, locale, order_value_limit, status",
+            )
+            .eq("house_id", houseId),
+        ),
+        must<HouseScore[]>(
+          db
+            .from("house_scores")
+            .select(
+              "house_id, period_start, period_end, on_time_pct, defect_pct, avg_approval_turnaround_hours, claims_count, orders_count",
+            )
+            .eq("house_id", houseId)
+            .order("period_end", { ascending: false }),
+        ),
+        must<Client[]>(db.from("clients").select("id, code, name, country, city, currency")),
+        must<ProductionStage[]>(db.from("production_stages").select(STAGE_COLUMNS).order("sort")),
+        must<Issue[]>(db.from("issues").select(ISSUE_COLUMNS).eq("house_id", houseId)),
+        must<Style[]>(
+          db
+            .from("styles")
+            .select("id, code, name, fabric, composition, lead_time_days, moq_packs, base_price")
+            .eq("house_id", houseId),
+        ),
+        must<AuditEvent[]>(
+          db
+            .from("events")
+            .select("id, actor_id, entity_type, entity_id, action, created_at")
+            .eq("entity_id", houseId),
+        ),
+      ]);
+
+      const events = orderIds.length
+        ? await must<ProductionEvent[]>(
+            db.from("production_events").select(EVENT_COLUMNS).in("manufacturer_order_id", orderIds),
+          )
+        : [];
+
+      return {
+        house,
+        contacts,
+        scores,
+        orders,
+        clientNames: new Map(clients.map((c) => [c.id, c.name])),
+        events,
+        stages,
+        issues,
+        styles,
+        auditEvents,
+      };
+    },
+    enabled: Boolean(houseId),
   });
 }
 
@@ -389,7 +630,7 @@ async function fetchGateDetail(gateKey: string): Promise<GateDetail | null> {
           db
             .from("house_scores")
             .select(
-              "house_id, period_start, period_end, on_time_pct, defect_pct, avg_approval_turnaround_hours, orders_count",
+              "house_id, period_start, period_end, on_time_pct, defect_pct, avg_approval_turnaround_hours, claims_count, orders_count",
             )
             .eq("house_id", order.house_id)
             .order("period_end", { ascending: false }),

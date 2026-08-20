@@ -170,6 +170,40 @@ is guarded on `status IN ('in_review','approved')` and shipping on the order not
 having shipped already, so a double-click or a second tab cannot fire either
 twice.
 
+## Partner search and the 360 profiles
+
+One box in the sidebar finds a client or a house by **name, code, record id,
+city, or phone**, and every result says *which* field it matched — a search
+spanning six fields is unreadable otherwise. `/search` is the full results page;
+`/clients` and `/houses` are searchable lists over the same matcher.
+
+`/clients/[id]` and `/houses/[id]` are the histories: Overview, Orders,
+Finance (clients) or Quality (houses), and Activity.
+
+Three things about this schema shape what those pages can honestly show:
+
+**Phone lives on `app_users`.** Neither `clients` nor `houses` has a phone
+column; contacts hang off them by `client_id` / `house_id`. So a phone search
+matches a contact and resolves to the party, and the hit names the contact. A
+party with no linked contact cannot be found by phone — today that is every
+house, since only the client has a contact row.
+
+**There is no house-side finance.** `invoices`, `payments`, `credit_notes` and
+`ledger_entries` are keyed by `client_id` only — nothing records what Noor owes
+a house. The house profile reports *order value booked*, which is real, and says
+plainly that payables are not recorded rather than showing an empty card.
+
+**The audit log is empty.** `events(entity_type, entity_id, action, …)` exists
+and nothing writes to it. So the Activity rail is reconstructed from the
+timestamps the system actually keeps — orders raised, stages completed, issues
+raised and resolved, invoices, payments, credit notes — with real `events` rows
+merged in if anything ever starts writing them. Each line carries a chip naming
+the subsystem it came from, so nothing reads as a log entry that does not exist.
+
+Search runs in the browser over the cached party list, which is right at four
+houses and one client. At thousands of partners it wants to become a Postgres
+`ilike`/trigram query behind a debounce; `SearchHit` would not change shape.
+
 ## Layout of the code
 
 ```
@@ -181,6 +215,8 @@ components/ui/           §5 primitives + the §7.6 approval stepper
 components/charts/       §6 charts
 components/shell/        sidebar, page header, scope bar
 lib/gates.ts             the gate model and its writes — read this first
+lib/search.ts            partner matching across name/code/id/city/phone
+lib/profile.ts           balances, delivery record, order book, activity rail
 lib/metrics.ts           KPI derivation, point-in-time from real timestamps
 lib/realtime.ts          subscriptions; invalidation, never local-state writes
 ```

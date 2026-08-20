@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EntitySwitcher } from "./entity-switcher";
+import { GlobalSearch } from "./global-search";
 import { useGateQueue, useIssues, useTenant } from "@/lib/queries";
 
 /**
@@ -113,6 +114,9 @@ export function Sidebar() {
       </div>
 
       <EntitySwitcher name={tenant.data?.name ?? "Noor"} />
+
+      {/* Partner search sits above the nav so it is reachable from every screen. */}
+      <GlobalSearch />
 
       <nav className="mt-2 flex-1 overflow-y-auto px-3" aria-label="Main">
         {groups.map((group, gi) => (
