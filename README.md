@@ -140,6 +140,30 @@ lib/realtime.ts          subscriptions; invalidation, never local-state writes
 ## Scope
 
 Built: the gate queue carrying all four gate types, the gate detail, the home
-dashboard, and the order board with detail. Every other sidebar row is a real
-route rendering a §5.10 empty state. No auth, no RLS, no multi-tenant switching,
-no print/export view, no density toggle, no command palette.
+dashboard, the order board with detail, and the issues desk. Every other sidebar
+row is a real route rendering a §5.10 empty state. No auth, no RLS, no
+multi-tenant switching, no print/export view, no density toggle, no command
+palette.
+
+### Issues
+
+This dashboard's only verb on `issues` is **resolve**, so the page walks them
+along the `issue_status` ladder — open → investigating → proposed → approved →
+resolved, with rejection available until the end — and records what the fix
+cost. Every write is guarded on the status the operator was looking at, so two
+people working the same list cannot double-advance a row.
+
+`client_visible` is shown on every row and never editable here. Whoever raises
+an issue decides whether the client sees it; changing that from the resolver's
+chair would rewrite what the client was told.
+
+`issues.sla_due_at` is null on the seeded rows, but `issue_types.sla_hours` is
+populated — so the deadline is derived from the type and the moment the issue
+was raised, preferring the stored value when there is one. That is a
+display-only computation, not a column anyone needs to add.
+
+**Two things to know before demoing this page.** `issues` is not in the
+`supabase_realtime` publication, so unlike the gate queue it does not update on
+its own — a problem raised on the seller's phone appears on the next refetch,
+not within two seconds. And the seed holds exactly one issue, already resolved,
+so the page opens empty under its default "Open issues" filter.

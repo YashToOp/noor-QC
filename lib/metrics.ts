@@ -189,6 +189,78 @@ export function ordersBehindSchedule(
     .sort((a, b) => b.daysLate - a.daysLate);
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+   Issues
+   ──────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Issues open as at `t`: raised by then, not finished by then.
+ *
+ * `resolved_at` is stamped for rejections as well as resolutions, so it is the
+ * one honest marker of "this stopped being work".
+ */
+export function openIssuesAt(issues: Issue[], t: number): number {
+  return issues.filter((i) => {
+    const raised = at(i.raised_at);
+    if (raised === null || raised > t) return false;
+    const done = at(i.resolved_at);
+    return done === null || done > t;
+  }).length;
+}
+
+/** Open issues that were already past their deadline as at `t`. */
+export function slaBreachedAt(
+  issues: Issue[],
+  dueAt: (issue: Issue) => string | null,
+  t: number,
+): number {
+  return issues.filter((i) => {
+    const raised = at(i.raised_at);
+    if (raised === null || raised > t) return false;
+    const done = at(i.resolved_at);
+    if (done !== null && done <= t) return false;
+    const due = at(dueAt(i));
+    return due !== null && due < t;
+  }).length;
+}
+
+/** The money riding on issues that were still open as at `t`. */
+export function issueCostAtRiskAt(issues: Issue[], t: number): number {
+  return issues
+    .filter((i) => {
+      const raised = at(i.raised_at);
+      if (raised === null || raised > t) return false;
+      const done = at(i.resolved_at);
+      return done === null || done > t;
+    })
+    .reduce((sum, i) => sum + Number(i.cost_impact ?? 0), 0);
+}
+
+/**
+ * Median hours from raised to finished, over the issues that finished inside
+ * the window. Median rather than mean: one pathological issue should not move
+ * the number the operator is judged on.
+ *
+ * Returns null when nothing finished in the window — an unknown figure renders
+ * as `—`, never as 0 (§5.2).
+ */
+export function medianResolutionHours(issues: Issue[], range: DateRange): number | null {
+  const spans: number[] = [];
+
+  for (const i of issues) {
+    const raised = at(i.raised_at);
+    const done = at(i.resolved_at);
+    if (raised === null || done === null) continue;
+    if (done < range.from.getTime() || done > range.to.getTime()) continue;
+    spans.push((done - raised) / 3_600_000);
+  }
+
+  if (!spans.length) return null;
+  spans.sort((a, b) => a - b);
+  const mid = Math.floor(spans.length / 2);
+  return spans.length % 2 ? spans[mid] : (spans[mid - 1] + spans[mid]) / 2;
+}
+
 function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
   const out = new Map<K, T[]>();
   for (const item of items) {
