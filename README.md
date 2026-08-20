@@ -17,6 +17,31 @@ deliberate demo scope, so the anon key reads everything — see
 `docs/04-security-rls.md` in the build pack for the production security model.
 **Do not reuse this pattern for a project holding real client records.**
 
+## Hosted
+
+| | |
+|---|---|
+| Production | https://noor-core.vercel.app |
+| Project | `noor-core` on the `yashtoops-projects` team |
+| Production branch | `claude/noor-core-qc-dashboard-4lfzne` (the repo's default branch) |
+
+Vercel builds from git, so a push to that branch redeploys. Build-time config
+comes from the committed `.env.production`; to move it into Vercel's own
+environment variables instead, add `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` under Project → Settings → Environment
+Variables, delete the file, and redeploy. Both are `NEXT_PUBLIC_`, so either way
+they are inlined into the client bundle and readable by anyone who loads the
+page — that is inherent to a browser-only Supabase client, not a property of
+where the values are stored.
+
+**The deployment is public and has no auth.** Deployment protection is off, this
+build has no login by design (build prompt Part F), and RLS is off on the shared
+project. Anyone with the URL can read every client, order and price in the demo
+database, and can release orders, decide gates and resolve issues. The anon key
+is already public in this repo and inside the Flutter APKs, so the URL does not
+create the exposure — it makes it convenient. Vercel password protection is the
+cheap mitigation if the link is going anywhere beyond the demo laptop.
+
 ## Rule Zero
 
 All three surfaces use one Supabase project: `noor-demo`
