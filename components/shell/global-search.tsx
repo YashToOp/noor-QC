@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Search, Users } from "lucide-react";
+import { Building2, Receipt, Search, Users } from "lucide-react";
 import { PopoverPanel, useDismiss } from "@/components/ui/popover";
-import { useAppUsers, useClients, useHouses } from "@/lib/queries";
+import { useAppUsers, useClients, useHouses, useInvoices, useOrders } from "@/lib/queries";
 import { searchParties, type SearchHit } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
@@ -12,9 +12,11 @@ import { cn } from "@/lib/utils";
  * Global partner search — DESIGN_SYSTEM.md §5.6's page-level search at 36px,
  * living in the sidebar so it is reachable from every screen.
  *
- * Finds a client or a house by name, code, id, city or phone. Results show
- * *why* they matched, because a box that searches six fields is otherwise
- * unreadable — a hit on a phone number looks identical to a hit on a name.
+ * Finds a client, a house or a **bill** — by name, code, record id, city, a
+ * phone number off a message, or the number printed on the document. Results
+ * say *why* they matched, because a box that searches this many fields is
+ * otherwise unreadable: a hit on a phone number looks identical to a hit on a
+ * name, and a bill number looks like neither.
  *
  * Fully keyboard-driven (§8): ↓/↑ move, Enter opens the highlighted row or
  * falls through to the full results page, Escape closes.
@@ -32,6 +34,8 @@ export function GlobalSearch() {
   const clients = useClients();
   const houses = useHouses();
   const users = useAppUsers();
+  const invoices = useInvoices();
+  const orders = useOrders();
 
   const hits = React.useMemo(
     () =>
@@ -40,8 +44,10 @@ export function GlobalSearch() {
         clients: clients.data ?? [],
         houses: houses.data ?? [],
         users: users.data ?? [],
+        invoices: invoices.data ?? [],
+        orders: orders.data ?? [],
       }).slice(0, 8),
-    [query, clients.data, houses.data, users.data],
+    [query, clients.data, houses.data, users.data, invoices.data, orders.data],
   );
 
   React.useEffect(() => {
@@ -83,8 +89,8 @@ export function GlobalSearch() {
         <input
           type="search"
           value={query}
-          placeholder="Search clients, houses, phone…"
-          aria-label="Search clients and houses"
+          placeholder="Client, house, phone or bill no…"
+          aria-label="Search clients, houses and bills"
           aria-expanded={open && hits.length > 0}
           aria-controls="global-search-results"
           role="combobox"
@@ -132,8 +138,10 @@ export function GlobalSearch() {
                 >
                   {hit.kind === "client" ? (
                     <Users className="size-3.5" />
-                  ) : (
+                  ) : hit.kind === "house" ? (
                     <Building2 className="size-3.5" />
+                  ) : (
+                    <Receipt className="size-3.5" />
                   )}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">

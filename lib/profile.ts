@@ -184,7 +184,15 @@ export interface ActivityEntry {
   title: string;
   detail?: string;
   /** Which subsystem the line came from — rendered as a chip. */
-  source: "Order" | "Gate" | "Production" | "Issue" | "Finance" | "Enquiry" | "Log";
+  source:
+    | "Order"
+    | "Gate"
+    | "Production"
+    | "Issue"
+    | "Finance"
+    | "Enquiry"
+    | "Sample"
+    | "Log";
   href?: string;
 }
 

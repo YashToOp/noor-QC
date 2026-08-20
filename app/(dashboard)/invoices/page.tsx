@@ -451,6 +451,7 @@ export default function InvoicesPage() {
                 columns={invoiceColumns}
                 rows={invoices.data ?? []}
                 rowKey={(i) => i.id}
+                onRowClick={(i) => router.push(`/invoices/bill/${i.id}`)}
                 defaultSort={{ columnId: "issued", direction: "desc" }}
                 empty={
                   <EmptyState

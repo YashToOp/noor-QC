@@ -1,4 +1,5 @@
-import type { AppUser, Client, House } from "./types";
+import { billMatches, billSubtitle } from "./bill";
+import type { AppUser, Client, House, Invoice, ManufacturerOrder } from "./types";
 
 /**
  * PARTNER SEARCH
@@ -12,12 +13,18 @@ import type { AppUser, Client, House } from "./types";
  * So a phone search matches a contact and resolves to the party they belong
  * to, and the result says which contact matched — otherwise a hit on a number
  * the operator typed looks like magic rather than a fact.
+ *
+ * The box also takes a **bill number**, which is the identifier everyone
+ * outside this building actually holds. A bill hit outranks every party hit:
+ * `INV-2026-0158` can only mean one thing, where a name fragment can mean
+ * several, so when the operator types a bill number they are not browsing.
  */
 
 export type PartyKind = "client" | "house";
+export type HitKind = PartyKind | "invoice";
 
 export interface SearchHit {
-  kind: PartyKind;
+  kind: HitKind;
   id: string;
   /** Party name — the primary identifier in the result row. */
   title: string;
@@ -45,12 +52,14 @@ function contains(haystack: string | null | undefined, needle: string): boolean 
  * Lower sorts first.
  */
 function rank(matchedOn: string): number {
-  if (matchedOn.startsWith("Code")) return 0;
-  if (matchedOn.startsWith("ID")) return 1;
-  if (matchedOn.startsWith("Name")) return 2;
-  if (matchedOn.startsWith("Phone")) return 3;
-  if (matchedOn.startsWith("Contact")) return 4;
-  return 5;
+  if (matchedOn.startsWith("Bill")) return 0;
+  if (matchedOn.startsWith("Order")) return 1;
+  if (matchedOn.startsWith("Code")) return 2;
+  if (matchedOn.startsWith("ID")) return 3;
+  if (matchedOn.startsWith("Name")) return 4;
+  if (matchedOn.startsWith("Phone")) return 5;
+  if (matchedOn.startsWith("Contact")) return 6;
+  return 7;
 }
 
 export interface SearchInput {
@@ -58,6 +67,10 @@ export interface SearchInput {
   clients: Client[];
   houses: House[];
   users: AppUser[];
+  /** Bills. Optional so callers that only want partners need not fetch them. */
+  invoices?: Invoice[];
+  /** Needed to name the order a bill covers, and to match on its number. */
+  orders?: ManufacturerOrder[];
 }
 
 /**
@@ -69,7 +82,14 @@ export interface SearchInput {
  * reaches the thousands this wants to become a Postgres `ilike` / trigram
  * query behind a debounce — the shape of `SearchHit` would not change.
  */
-export function searchParties({ query, clients, houses, users }: SearchInput): SearchHit[] {
+export function searchParties({
+  query,
+  clients,
+  houses,
+  users,
+  invoices = [],
+  orders = [],
+}: SearchInput): SearchHit[] {
   const raw = query.trim();
   if (!raw) return [];
 
@@ -140,6 +160,36 @@ export function searchParties({ query, clients, houses, users }: SearchInput): S
       { code: h.code, city: h.city, country: h.country },
       contactsFor((u) => u.house_id === h.id),
     );
+  }
+
+  // ── Bills ─────────────────────────────────────────────────────────────
+  const orderById = new Map(orders.map((o) => [o.id, o]));
+  const clientById = new Map(clients.map((c) => [c.id, c]));
+  const houseById = new Map(houses.map((h) => [h.id, h]));
+
+  for (const inv of invoices) {
+    const order = inv.manufacturer_order_id
+      ? orderById.get(inv.manufacturer_order_id) ?? null
+      : null;
+    if (!billMatches(inv.number, order?.number ?? null, raw)) continue;
+
+    const client = inv.client_id ? clientById.get(inv.client_id) ?? null : null;
+    const house = order?.house_id ? houseById.get(order.house_id) ?? null : null;
+
+    hits.push({
+      kind: "invoice",
+      id: inv.id,
+      title: inv.number,
+      subtitle: billSubtitle(client?.name ?? null, order?.number ?? null, house?.name ?? null),
+      // Say which of the two numbers matched: an operator who typed an order
+      // number needs to know the row they got back is the bill for it.
+      matchedOn: inv.number.toLowerCase().includes(q)
+        ? `Bill ${inv.number}`
+        : order && order.number.toLowerCase().includes(q)
+          ? `Order ${order.number}`
+          : `Bill ${inv.number}`,
+      href: `/invoices/bill/${inv.id}`,
+    });
   }
 
   return hits.sort((a, b) => {

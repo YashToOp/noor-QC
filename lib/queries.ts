@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import { deriveOpenableGates, type GateType } from "./gates";
+import type { BillDossier } from "./bill";
 import type {
   Approval,
   AppUser,
@@ -55,6 +56,7 @@ export const qk = {
   masters: ["masters"] as const,
   media: ["media-assets"] as const,
   invoiceBatch: (id: string) => ["invoice-batch", id] as const,
+  bill: (id: string) => ["bill", id] as const,
 };
 
 async function must<T>(p: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
@@ -1081,5 +1083,162 @@ export function useOrderDetail(orderId: string) {
       };
     },
     enabled: Boolean(orderId),
+  });
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   One bill, and everything behind it
+   ──────────────────────────────────────────────────────────────────────── */
+
+const LINE_COLUMNS =
+  "id, manufacturer_order_id, style_id, colourway_id, packs, pcs, unit_price, line_total, status";
+
+// Two columns the shared lists leave out because no other screen names people:
+// a bill has to say who confirmed it, so this query asks for the actor ids.
+const BILL_APPROVAL_COLUMNS =
+  "id, manufacturer_order_id, order_line_id, type, title, swatch_ref, lighting, due_at, status, decision, reason, decided_at, decided_by";
+const BILL_ISSUE_COLUMNS =
+  "id, issue_type_id, manufacturer_order_id, house_id, client_id, raised_at, description, status, sla_due_at, resolution, cost_impact, days_impact, resolved_at, client_visible, raised_by, approver_id";
+
+/**
+ * Everything a bill number should turn into: the buyer, the seller, the house
+ * that made the goods, and every dated thing that happened in between.
+ *
+ * Payments are fetched for the **client**, not the bill, because that is how
+ * the schema records them — there is no `payments.invoice_id`. They are cut to
+ * the ones received on or after this bill's issue date, and the page says
+ * plainly that they settle the account rather than this document alone.
+ */
+export function useBillDossier(invoiceId: string) {
+  return useQuery({
+    queryKey: qk.bill(invoiceId),
+    enabled: Boolean(invoiceId),
+    queryFn: async (): Promise<BillDossier | null> => {
+      const db = supabase();
+
+      const invoices = await must<Invoice[]>(
+        db.from("invoices").select(INVOICE_COLUMNS).eq("id", invoiceId).limit(1),
+      );
+      const invoice = invoices[0];
+      if (!invoice) return null;
+
+      const orderId = invoice.manufacturer_order_id;
+
+      const [orders, tenants, people, stages, issueTypes] = await Promise.all([
+        orderId
+          ? must<ManufacturerOrder[]>(
+              db.from("manufacturer_orders").select(ORDER_COLUMNS).eq("id", orderId).limit(1),
+            )
+          : Promise.resolve([] as ManufacturerOrder[]),
+        must<Tenant[]>(db.from("tenants").select("id, slug, name, name_ar, default_currency").limit(1)),
+        must<AppUser[]>(
+          db.from("app_users").select("id, role, client_id, house_id, display_name, phone, status"),
+        ),
+        must<ProductionStage[]>(db.from("production_stages").select(STAGE_COLUMNS).order("sort")),
+        must<IssueType[]>(
+          db.from("issue_types").select("id, category, code, name, sla_hours, default_client_visible"),
+        ),
+      ]);
+
+      const order = orders[0] ?? null;
+
+      const [clients, houses, enquiries, lines, reviews, events, approvals, issues, payments, creditNotes, ledger] =
+        await Promise.all([
+          invoice.client_id
+            ? must<Client[]>(
+                db
+                  .from("clients")
+                  .select("id, code, name, country, city, currency")
+                  .eq("id", invoice.client_id)
+                  .limit(1),
+              )
+            : Promise.resolve([] as Client[]),
+          order?.house_id
+            ? must<House[]>(
+                db
+                  .from("houses")
+                  .select("id, code, name, city, country, established_year, worker_count, specialities, status")
+                  .eq("id", order.house_id)
+                  .limit(1),
+              )
+            : Promise.resolve([] as House[]),
+          order?.enquiry_id
+            ? must<Enquiry[]>(
+                db
+                  .from("enquiries")
+                  .select(
+                    "id, client_id, basket_id, number, requested_delivery_from, requested_delivery_to, status, submitted_at",
+                  )
+                  .eq("id", order.enquiry_id)
+                  .limit(1),
+              )
+            : Promise.resolve([] as Enquiry[]),
+          orderId
+            ? must<OrderLine[]>(
+                db.from("manufacturer_order_lines").select(LINE_COLUMNS).eq("manufacturer_order_id", orderId),
+              )
+            : Promise.resolve([] as OrderLine[]),
+          orderId
+            ? must<OrderReview[]>(
+                db.from("order_reviews").select("*").eq("manufacturer_order_id", orderId),
+              )
+            : Promise.resolve([] as OrderReview[]),
+          orderId
+            ? must<ProductionEvent[]>(
+                db.from("production_events").select(EVENT_COLUMNS).eq("manufacturer_order_id", orderId),
+              )
+            : Promise.resolve([] as ProductionEvent[]),
+          orderId
+            ? must<Approval[]>(
+                db.from("approvals").select(BILL_APPROVAL_COLUMNS).eq("manufacturer_order_id", orderId),
+              )
+            : Promise.resolve([] as Approval[]),
+          orderId
+            ? must<Issue[]>(
+                db.from("issues").select(BILL_ISSUE_COLUMNS).eq("manufacturer_order_id", orderId),
+              )
+            : Promise.resolve([] as Issue[]),
+          invoice.client_id && invoice.issued_at
+            ? must<Payment[]>(
+                db
+                  .from("payments")
+                  .select(PAYMENT_COLUMNS)
+                  .eq("client_id", invoice.client_id)
+                  .gte("received_at", invoice.issued_at)
+                  .order("received_at"),
+              )
+            : Promise.resolve([] as Payment[]),
+          orderId
+            ? must<CreditNote[]>(
+                db.from("credit_notes").select(CREDIT_COLUMNS).eq("manufacturer_order_id", orderId),
+              )
+            : Promise.resolve([] as CreditNote[]),
+          must<LedgerEntry[]>(db.from("ledger_entries").select(LEDGER_COLUMNS).eq("ref_id", invoiceId)),
+        ]);
+
+      return {
+        invoice,
+        order,
+        enquiry: enquiries[0] ?? null,
+        client: clients[0] ?? null,
+        house: houses[0] ?? null,
+        tenant: tenants[0] ?? null,
+        lines,
+        reviews: reviews.sort(
+          (a, b) =>
+            new Date(a.started_at ?? a.decided_at ?? 0).getTime() -
+            new Date(b.started_at ?? b.decided_at ?? 0).getTime(),
+        ),
+        events,
+        stages,
+        approvals,
+        issues,
+        issueTypes,
+        payments,
+        creditNotes,
+        ledger,
+        people: new Map(people.map((u) => [u.id, u])),
+      };
+    },
   });
 }
